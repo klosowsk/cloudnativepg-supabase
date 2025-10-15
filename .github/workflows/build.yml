@@ -1,0 +1,84 @@
+name: Build and Push
+
+on:
+  push:
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract PostgreSQL version from tag
+        id: version
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            VERSION=${GITHUB_REF#refs/tags/v}
+            PG_MAJOR=$(echo $VERSION | cut -d. -f1)
+            echo "pg_major=${PG_MAJOR}" >> $GITHUB_OUTPUT
+          else
+            echo "pg_major=15" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: klosowsk/cloudnativepg-supabase
+          tags: |
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+
+      - name: Login to Docker Hub
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          tags: klosowsk/cloudnativepg-supabase:test
+          load: true
+          build-args: |
+            PG_MAJOR=${{ steps.version.outputs.pg_major }}
+
+      - name: Test image
+        run: |
+          docker run --name test \
+            -e POSTGRES_PASSWORD=test \
+            -e JWT_SECRET=test-secret-with-at-least-32-characters-long \
+            -d klosowsk/cloudnativepg-supabase:test
+
+          echo "Waiting for PostgreSQL to start..."
+          sleep 20
+
+          echo "=== PostgreSQL logs ==="
+          docker logs test
+
+          echo "=== Testing extensions ==="
+          docker exec test psql -U postgres -c "SELECT extname, extversion FROM pg_extension ORDER BY extname;"
+
+          echo "=== Testing schemas ==="
+          docker exec test psql -U postgres -c "SELECT schema_name FROM information_schema.schemata WHERE schema_name IN ('auth', 'storage', 'realtime', 'supabase_functions');"
+
+          docker rm -f test
+
+      - name: Push to registry
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            PG_MAJOR=${{ steps.version.outputs.pg_major }}

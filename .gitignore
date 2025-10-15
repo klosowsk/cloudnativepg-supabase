@@ -1,0 +1,31 @@
+# Cloned repositories (used for reference only)
+supabase-postgres/
+supabase-kubernetes/
+supabase/
+
+# Docker
+*.tar
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+
+# Test databases
+*.db
+*.sqlite
+
+# Temporary files
+/tmp/
+*.tmp
+
+# Documentation in progress
+docs/
+ARCHITECTURE.md
