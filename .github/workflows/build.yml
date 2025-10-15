@@ -56,13 +56,17 @@ jobs:
           docker run --name test \
             -e POSTGRES_PASSWORD=test \
             -e JWT_SECRET=test-secret-with-at-least-32-characters-long \
+            -v /tmp/pgdata:/var/lib/postgresql/data \
             -d klosowsk/cloudnativepg-supabase:test
 
           echo "Waiting for PostgreSQL to start..."
-          sleep 20
+          sleep 30
 
           echo "=== PostgreSQL logs ==="
           docker logs test
+
+          echo "=== Checking container status ==="
+          docker ps -a | grep test
 
           echo "=== Testing extensions ==="
           docker exec test psql -U postgres -c "SELECT extname, extversion FROM pg_extension ORDER BY extname;"
@@ -71,6 +75,7 @@ jobs:
           docker exec test psql -U postgres -c "SELECT schema_name FROM information_schema.schemata WHERE schema_name IN ('auth', 'storage', 'realtime', 'supabase_functions');"
 
           docker rm -f test
+          sudo rm -rf /tmp/pgdata
 
       - name: Push to registry
         if: github.event_name != 'pull_request'

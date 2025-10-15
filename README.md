@@ -14,12 +14,6 @@ This image follows semantic versioning: `MAJOR.MINOR.PATCH`
 - **MINOR** (0) = Feature updates (new migrations, extension updates)
 - **PATCH** (0) = Bug fixes only
 
-**Available tags:**
-- `15.0.0` - Exact version, never changes (recommended for production)
-- `15.0` - Latest patch for 15.0.x (gets bug fixes automatically)
-
-**Example:** `v15.0.0` uses PostgreSQL 15.x (currently 15.14), `v16.0.0` would use PostgreSQL 16.x
-
 **No `latest` or `15` tags** - always specify the version you want for predictable deployments.
 
 **Why use this image?**
