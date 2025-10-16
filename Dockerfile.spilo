@@ -1,0 +1,100 @@
+# Custom Spilo image with Supabase extensions and migrations
+# Extends Zalando's Spilo base image with Pigsty repository for newer extension versions
+#
+# Build: docker build -f Dockerfile.spilo -t ghcr.io/your-org/spilo-supabase:17-1.0.0 .
+# Push:  docker push ghcr.io/your-org/spilo-supabase:17-1.0.0
+#
+# Unlike CloudNativePG which ignores /docker-entrypoint-initdb.d/, Spilo/Patroni
+# actually executes scripts from the image via bootstrap.post_init callback.
+
+ARG SPILO_VERSION=4.0-p3
+ARG PGVERSION=17
+
+FROM ghcr.io/zalando/spilo-${PGVERSION}:${SPILO_VERSION}
+
+USER root
+
+# Set non-interactive mode for apt
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install required tools
+RUN apt-get update && apt-get install -y \
+    curl \
+    ca-certificates \
+    wget \
+    gnupg \
+    lsb-release \
+    && rm -rf /var/lib/apt/lists/*
+
+# Add Pigsty APT repository for Supabase extensions
+ARG PGVERSION
+RUN mkdir -p /etc/apt/keyrings && \
+    curl -fsSL https://repo.pigsty.io/key | gpg --dearmor -o /etc/apt/keyrings/pigsty.gpg && \
+    DISTRO=$(lsb_release -cs) && \
+    echo "deb [signed-by=/etc/apt/keyrings/pigsty.gpg] https://repo.pigsty.io/apt/infra generic main" > /etc/apt/sources.list.d/pigsty-io.list && \
+    echo "deb [signed-by=/etc/apt/keyrings/pigsty.gpg] https://repo.pigsty.io/apt/pgsql/${DISTRO} ${DISTRO} main" >> /etc/apt/sources.list.d/pigsty-io.list && \
+    cat /etc/apt/sources.list.d/pigsty-io.list && \
+    apt-get update && \
+    # Install libsodium dependency (needed by pgsodium)
+    apt-get install -y libsodium23 && \
+    # Install extensions from PGDG (already configured in Spilo)
+    apt-get install -y \
+        postgresql-${PGVERSION}-pgvector \
+        postgresql-${PGVERSION}-cron \
+        postgresql-${PGVERSION}-wal2json \
+        postgresql-${PGVERSION}-postgis-3 \
+        postgresql-${PGVERSION}-pgaudit \
+        postgresql-${PGVERSION}-plpgsql-check \
+        postgresql-${PGVERSION}-pgtap \
+        postgresql-${PGVERSION}-http \
+        && echo "✓ Installed extensions from PGDG" && \
+    # Install Supabase-specific extensions from Pigsty APT repo
+    apt-get install -y \
+        postgresql-${PGVERSION}-pg-net \
+        postgresql-${PGVERSION}-pgsodium \
+        postgresql-${PGVERSION}-vault \
+        postgresql-${PGVERSION}-pg-graphql \
+        postgresql-${PGVERSION}-supautils \
+        postgresql-${PGVERSION}-pg-tle \
+        postgresql-${PGVERSION}-pgjwt \
+        postgresql-${PGVERSION}-pg-jsonschema \
+        postgresql-${PGVERSION}-wrappers \
+        postgresql-${PGVERSION}-pgmq \
+        postgresql-${PGVERSION}-pg-plan-filter \
+        postgresql-${PGVERSION}-pg-wait-sampling \
+        && echo "✓ Installed Supabase extensions from Pigsty"
+
+# Create directory for Supabase migrations
+RUN mkdir -p /supabase-migrations/custom-init-scripts \
+             /supabase-migrations/init-scripts \
+             /supabase-migrations/migrations
+
+# Copy Supabase migrations from existing migration structure
+# This structure matches the CloudNativePG approach but will actually work with Spilo
+COPY --chown=postgres:postgres migrations/custom-init-scripts/*.sql /supabase-migrations/custom-init-scripts/
+COPY --chown=postgres:postgres migrations/init-scripts/*.sql /supabase-migrations/init-scripts/
+COPY --chown=postgres:postgres migrations/migrations/*.sql /supabase-migrations/migrations/
+
+# Copy Supabase-specific initialization script
+# This script runs the migrations in order during Patroni bootstrap
+COPY --chown=postgres:postgres scripts/supabase_post_init.sh /scripts/supabase_post_init.sh
+RUN chmod +x /scripts/supabase_post_init.sh
+
+# Hook into Spilo's existing post_init.sh
+# Spilo's post_init.sh is called automatically by Patroni during bootstrap
+# We append a call to our Supabase initialization script
+RUN echo "" >> /scripts/post_init.sh && \
+    echo "# Run Supabase-specific initialization" >> /scripts/post_init.sh && \
+    echo "echo 'Running Supabase migrations...'" >> /scripts/post_init.sh && \
+    echo "/scripts/supabase_post_init.sh \"\$@\"" >> /scripts/post_init.sh && \
+    echo "echo 'Supabase migrations completed'" >> /scripts/post_init.sh
+
+# Clean up
+RUN apt-get clean && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
+USER postgres
+
+LABEL org.opencontainers.image.title="Spilo PostgreSQL with Supabase Extensions"
+LABEL org.opencontainers.image.description="Spilo-based PostgreSQL image with all Supabase extensions from Pigsty and pre-baked migrations"
+LABEL org.opencontainers.image.source="https://github.com/klosowsk/cnpg-supabase"
+LABEL org.opencontainers.image.licenses="Apache-2.0"
