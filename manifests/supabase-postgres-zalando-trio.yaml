@@ -1,14 +1,20 @@
 ---
-# Zalando Postgres Operator manifest for Supabase
-# This creates a 3-node HA PostgreSQL cluster with all Supabase requirements
+# Zalando Postgres Operator manifest for Supabase - TRIO (3 nodes)
+# This creates a 3-node HA PostgreSQL cluster (1 primary + 2 replicas)
+# Suitable for: Production workloads requiring high availability
 #
 # Prerequisites:
 # 1. Zalando Postgres Operator installed in cluster
-# 2. Custom Spilo image built and pushed to registry
-# 3. Backup S3/MinIO credentials secret created
+# 2. Custom Spilo image available (klosowsk/spilo-supabase:17-latest)
+# 3. S3-compatible storage for backups (S3, MinIO, etc.)
+# 4. Backup credentials secret created
 #
-# Apply: kubectl apply -f manifests/supabase-postgres-zalando.yaml
+# Apply: kubectl apply -f manifests/supabase-postgres-zalando-trio.yaml
 # Watch: kubectl get postgresql -n supabase -w
+#
+# For other environments, see:
+# - supabase-postgres-zalando-single.yaml (1 node, development)
+# - supabase-postgres-zalando-duo.yaml (2 nodes, staging)
 
 apiVersion: "acid.zalan.do/v1"
 kind: postgresql
@@ -200,12 +206,6 @@ spec:
       limits:
         cpu: 500m
         memory: 500Mi
-    # PGBouncer configuration
-    parameters:
-      default_pool_size: "25"
-      max_client_conn: "1000"
-      reserve_pool_size: "5"
-      pool_mode: "transaction"
 
   # Backup configuration using WAL-G
   # This assumes you have S3-compatible storage (AWS S3, MinIO, etc.)
