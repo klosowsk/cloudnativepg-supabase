@@ -1,204 +1,108 @@
----
-# Zalando Postgres Operator manifest for Supabase - TRIO (3 nodes)
-# This creates a 3-node HA PostgreSQL cluster (1 primary + 2 replicas)
-# Suitable for: Production workloads requiring high availability
-#
-# Prerequisites:
-# 1. Zalando Postgres Operator installed in cluster
-# 2. Custom Spilo image available (klosowsk/spilo-supabase:17-latest)
-# 3. S3-compatible storage for backups (S3, MinIO, etc.)
-# 4. Backup credentials secret created
-#
-# Apply: kubectl apply -f manifests/supabase-postgres-zalando-trio.yaml
-# Watch: kubectl get postgresql -n supabase -w
-#
-# For other environments, see:
-# - supabase-postgres-zalando-single.yaml (1 node, development)
-# - supabase-postgres-zalando-duo.yaml (2 nodes, staging)
+# ============================================================
+# EXAMPLE TEMPLATE - Production (3 nodes)
+# ============================================================
+# Customize for your environment:
+#   - dockerImage (if using custom registry)
+#   - storageClass
+#   - resources (CPU/memory based on workload)
+#   - backup configuration (S3 bucket, endpoint, credentials)
+# ============================================================
 
 apiVersion: "acid.zalan.do/v1"
 kind: postgresql
 metadata:
   name: supabase-db
-  namespace: supabase
+  namespace: supabase  # TODO: Change if using different namespace
   labels:
     app: supabase
     component: database
 spec:
-  # Team ownership (for RBAC)
   teamId: "supabase"
-
-  # PostgreSQL version
   version: "17"
+  numberOfInstances: 3  # 1 primary + 2 replicas
 
-  # Number of instances (1 primary + 2 replicas for HA)
-  numberOfInstances: 3
-
-  # Custom Spilo image with Supabase extensions and migrations
-  # Use pre-built image or build your own (see BUILD.md)
-  dockerImage: klosowsk/spilo-supabase:17-latest
-  # Alternative: ghcr.io/klosowsk/spilo-supabase:17-latest
-  # Or your own: <your-registry>/spilo-supabase:17-latest
+  # Spilo Supabase image
+  dockerImage: klosowsk/spilo-supabase:17-latest  # TODO: Change to your registry if needed
 
   # Resources per pod
   resources:
     requests:
-      cpu: 1000m
-      memory: 2Gi
+      cpu: 1000m      # TODO: Adjust based on workload
+      memory: 2Gi     # TODO: Adjust based on workload
     limits:
       cpu: 2000m
       memory: 4Gi
 
   # Storage
   volume:
-    size: 20Gi
-    storageClass: standard  # Change to your storage class (e.g., fast-ssd, gp3, etc.)
+    size: 50Gi                # TODO: Adjust size for your data
+    storageClass: standard    # TODO: Change to your storage class
 
-  # Supabase users with required privileges
-  # Zalando operator creates these roles and stores passwords in K8s secrets
-  # Secret name format: {username}.{clustername}.credentials.postgresql.acid.zalan.do
+  # Supabase roles (auto-created by operator)
+  # Passwords stored in secrets: {username}.supabase-db.credentials.postgresql.acid.zalan.do
   users:
-    # Superuser for Supabase administration
     supabase_admin:
       - superuser
       - createdb
       - createrole
       - replication
       - bypassrls
-
-    # Service role with RLS bypass
     service_role:
       - bypassrls
-
-    # Authenticator (main connection user for PostgREST)
     authenticator: []
-
-    # Auth service admin
     supabase_auth_admin:
       - createrole
-
-    # Storage service admin
     supabase_storage_admin:
       - createrole
-
-    # Functions service admin (Edge Functions)
     supabase_functions_admin:
       - createrole
-
-    # Replication admin for realtime
     supabase_replication_admin:
       - replication
-
-    # Read-only user with RLS bypass (for admin queries)
     supabase_read_only_user:
       - bypassrls
-
-    # Supabase API roles (no login - used for RLS)
-    # Note: These are created as LOGIN roles by default, but Supabase migrations
-    # will convert them to NOLOGIN roles during initialization
     anon: []
     authenticated: []
 
-  # Databases
   databases:
     postgres: supabase_admin
 
-  # PostgreSQL configuration parameters
+  # PostgreSQL configuration
   postgresql:
     version: "17"
-
     parameters:
-      # Required extensions (preload at server start)
-      # Based on Pigsty Supabase HA configuration
+      # Required: Supabase extensions
       shared_preload_libraries: "timescaledb,pgsodium,pg_cron,pg_net,pg_stat_statements,auto_explain,pg_wait_sampling,pg_tle,plan_filter"
-
-      # pg_cron configuration
       cron.database_name: "postgres"
 
-      # Connection settings
-      max_connections: "200"
-
-      # Memory settings (tune based on your resources)
-      shared_buffers: "512MB"
-      effective_cache_size: "1536MB"
-      maintenance_work_mem: "128MB"
-      work_mem: "5MB"
-
-      # WAL settings for replication and PITR
+      # Required: Realtime/replication
       wal_level: "logical"
       max_wal_senders: "10"
       max_replication_slots: "10"
-      max_logical_replication_workers: "10"
 
-      # Checkpoint settings
-      checkpoint_timeout: "15min"
-      checkpoint_completion_target: "0.9"
-
-      # WAL archiving for backups
-      archive_mode: "on"
-      archive_timeout: "300s"
+      # Performance tuning
+      max_connections: "200"
+      shared_buffers: "512MB"       # TODO: Tune based on RAM (25% of memory)
+      effective_cache_size: "1536MB" # TODO: Tune based on RAM (75% of memory)
+      work_mem: "5MB"
+      maintenance_work_mem: "128MB"
 
       # Logging
-      log_destination: "csvlog"
-      logging_collector: "on"
-      log_directory: "pg_log"
-      log_filename: "postgresql-%w.log"
-      log_truncate_on_rotation: "on"
-      log_rotation_age: "1d"
-      log_statement: "ddl"
-      log_duration: "on"
       log_min_duration_statement: "1000"  # Log queries > 1s
-      log_checkpoints: "on"
-      log_connections: "on"
-      log_disconnections: "on"
-      log_lock_waits: "on"
-      log_temp_files: "0"
+      log_statement: "ddl"
 
-      # Performance monitoring
-      track_activities: "on"
-      track_counts: "on"
-      track_io_timing: "on"
-      track_functions: "all"
-
-      # Statement timeout (10 minutes for long queries)
-      statement_timeout: "600000"
-
-      # Lock timeout
-      lock_timeout: "10000"
-
-      # Autovacuum (aggressive for Supabase write patterns)
-      autovacuum: "on"
-      autovacuum_max_workers: "3"
-      autovacuum_naptime: "30s"
-
-  # Patroni configuration
+  # Patroni HA configuration
   patroni:
-    # PostgreSQL initialization options (only applies at bootstrap)
     initdb:
       encoding: "UTF8"
       locale: "en_US.UTF-8"
       data-checksums: "true"
-
-    # Synchronous replication for HA
-    # Set to false if you prefer async replication for better write performance
     synchronous_mode: true
-    synchronous_mode_strict: false  # Allow async if sync replica is down
+    synchronous_mode_strict: false
 
-    # DCS (etcd/K8s) timeouts
-    ttl: 30
-    loop_wait: 10
-    retry_timeout: 10
-
-    # Failover configuration
-    maximum_lag_on_failover: 33554432  # 32MB
-
-  # Connection pooler (PGBouncer) - HIGHLY RECOMMENDED for Supabase
-  # Supabase services make many short-lived connections
+  # Connection pooler (recommended for Supabase)
   connectionPooler:
     numberOfInstances: 2
-    mode: "transaction"  # Transaction pooling (most efficient)
-    schema: "pooler"
-    user: "pooler"
+    mode: "transaction"
     resources:
       requests:
         cpu: 100m
@@ -207,23 +111,21 @@ spec:
         cpu: 500m
         memory: 500Mi
 
-  # Backup configuration using WAL-G
-  # This assumes you have S3-compatible storage (AWS S3, MinIO, etc.)
+  # Backup configuration
+  # Create secret: kubectl create secret generic backup-s3-credentials \
+  #   --from-literal=access-key-id=YOUR_KEY \
+  #   --from-literal=secret-access-key=YOUR_SECRET \
+  #   -n supabase
   env:
-    # WAL-G backup to S3/MinIO
     - name: WAL_S3_BUCKET
-      value: "supabase-postgres-backups"
+      value: "supabase-postgres-backups"  # TODO: Change to your bucket name
 
-    # For AWS S3, use region endpoint
-    # For MinIO, use your MinIO endpoint
     - name: AWS_ENDPOINT
-      value: "https://s3.amazonaws.com"  # Change to your S3/MinIO endpoint
+      value: "https://s3.amazonaws.com"  # TODO: Change to your S3/MinIO endpoint
 
-    # S3 credentials from secret
-    # Create secret with: kubectl create secret generic backup-s3-credentials \
-    #   --from-literal=access-key-id=YOUR_KEY \
-    #   --from-literal=secret-access-key=YOUR_SECRET \
-    #   -n supabase
+    - name: AWS_REGION
+      value: "us-east-1"  # TODO: Change to your region
+
     - name: AWS_ACCESS_KEY_ID
       valueFrom:
         secretKeyRef:
@@ -236,91 +138,14 @@ spec:
           name: backup-s3-credentials
           key: secret-access-key
 
-    - name: AWS_REGION
-      value: "us-east-1"  # Change to your region
-
-    # Backup schedule (cron format)
-    # Default: daily at 2 AM
     - name: BACKUP_SCHEDULE
-      value: "0 2 * * *"
+      value: "0 2 * * *"  # Daily at 2 AM
 
-    # Enable WAL-G restore (for PITR)
     - name: USE_WALG_RESTORE
       value: "true"
 
-    # WAL-G compression (zstd is fastest)
     - name: WALG_COMPRESSION_METHOD
       value: "zstd"
 
-    # Backup retention (keep 14 days)
     - name: WALG_DELTA_MAX_STEPS
-      value: "14"
-
-  # Node affinity (optional - spread replicas across nodes/zones)
-  # Uncomment to enable anti-affinity
-  # podAnnotations:
-  #   # Spread pods across different nodes
-  #   pod-anti-affinity: "preferred"
-
-  # Sidecars (optional - for monitoring)
-  sidecars:
-    - name: postgres-exporter
-      image: quay.io/prometheuscommunity/postgres-exporter:latest
-      ports:
-        - name: metrics
-          containerPort: 9187
-          protocol: TCP
-      env:
-        - name: DATA_SOURCE_NAME
-          value: "postgresql://postgres@localhost:5432/postgres?sslmode=disable"
-      resources:
-        requests:
-          cpu: 50m
-          memory: 64Mi
-        limits:
-          cpu: 200m
-          memory: 256Mi
-
----
-# Service for direct PostgreSQL access (optional)
-# Zalando operator creates services automatically, but you can create additional ones
-apiVersion: v1
-kind: Service
-metadata:
-  name: supabase-db-direct
-  namespace: supabase
-  labels:
-    app: supabase
-    component: database
-spec:
-  type: ClusterIP
-  selector:
-    application: spilo
-    cluster-name: supabase-db
-    spilo-role: master  # Only route to primary
-  ports:
-    - name: postgresql
-      port: 5432
-      targetPort: 5432
-      protocol: TCP
-
----
-# Service for connection pooler (recommended for Supabase)
-apiVersion: v1
-kind: Service
-metadata:
-  name: supabase-db-pooler
-  namespace: supabase
-  labels:
-    app: supabase
-    component: database-pooler
-spec:
-  type: ClusterIP
-  selector:
-    application: db-connection-pooler
-    cluster-name: supabase-db
-  ports:
-    - name: postgresql
-      port: 5432
-      targetPort: 5432
-      protocol: TCP
+      value: "14"  # Keep 14 days of backups

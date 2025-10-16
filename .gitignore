@@ -26,8 +26,13 @@ supabase/
 /tmp/
 *.tmp
 
-# Documentation in progress
-docs/
+# Legacy documentation files
 ARCHITECTURE.md
 BUILD.md
+MIGRATION-CONTEXT.md
+README-OLD.md
+
+# Internal reference documentation (gitignored)
+docs/
+
 references/

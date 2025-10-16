@@ -1,48 +1,44 @@
----
-# Zalando Postgres Operator manifest for Supabase - DUO (2 nodes)
-# This creates a 2-node HA PostgreSQL cluster (1 primary + 1 replica)
-# Suitable for: Staging, small production workloads, cost-effective HA
-#
-# Prerequisites:
-# 1. Zalando Postgres Operator installed in cluster
-# 2. Custom Spilo image available (klosowsk/spilo-supabase:17-latest)
-# 3. (Optional) S3-compatible storage for backups
-#
-# Apply: kubectl apply -f manifests/supabase-postgres-zalando-duo.yaml
-# Watch: kubectl get postgresql -n supabase -w
+# ============================================================
+# EXAMPLE TEMPLATE - Staging (2 nodes)
+# ============================================================
+# Customize for your environment:
+#   - dockerImage (if using custom registry)
+#   - storageClass
+#   - resources (CPU/memory based on workload)
+#   - backup configuration (S3 bucket, endpoint, credentials)
+# ============================================================
 
 apiVersion: "acid.zalan.do/v1"
 kind: postgresql
 metadata:
   name: supabase-db
-  namespace: supabase
+  namespace: supabase  # TODO: Change if using different namespace
   labels:
     app: supabase
     component: database
-    env: staging
 spec:
   teamId: "supabase"
   version: "17"
+  numberOfInstances: 2  # 1 primary + 1 replica
 
-  # 2 instances: 1 primary + 1 replica for HA
-  numberOfInstances: 2
+  # Spilo Supabase image
+  dockerImage: klosowsk/spilo-supabase:17-latest  # TODO: Change to your registry if needed
 
-  dockerImage: klosowsk/spilo-supabase:17-latest
-
-  # Balanced resources for staging
+  # Resources per pod
   resources:
     requests:
+      cpu: 500m       # TODO: Adjust based on workload
+      memory: 1Gi     # TODO: Adjust based on workload
+    limits:
       cpu: 1000m
       memory: 2Gi
-    limits:
-      cpu: 2000m
-      memory: 4Gi
 
+  # Storage
   volume:
-    size: 20Gi
-    storageClass: fast-ssd  # Use SSD for better performance
+    size: 20Gi                # TODO: Adjust size for your data
+    storageClass: standard    # TODO: Change to your storage class
 
-  # Supabase users with full privileges
+  # Supabase roles (auto-created by operator)
   users:
     supabase_admin:
       - superuser
@@ -73,162 +69,58 @@ spec:
   postgresql:
     version: "17"
     parameters:
-      # Required extensions (preload at server start)
+      # Required: Supabase extensions
       shared_preload_libraries: "timescaledb,pgsodium,pg_cron,pg_net,pg_stat_statements,auto_explain,pg_wait_sampling,pg_tle,plan_filter"
       cron.database_name: "postgres"
-
-      # Connection settings
-      max_connections: "150"
-
-      # Memory settings
-      shared_buffers: "512MB"
-      effective_cache_size: "1536MB"
-      maintenance_work_mem: "128MB"
-      work_mem: "8MB"
-
-      # WAL settings for replication
       wal_level: "logical"
-      max_wal_senders: "8"
-      max_replication_slots: "8"
-      max_logical_replication_workers: "8"
+      max_wal_senders: "10"
+      max_replication_slots: "10"
 
-      # Checkpoint settings
-      checkpoint_timeout: "15min"
-      checkpoint_completion_target: "0.9"
+      # Performance tuning
+      max_connections: "100"
+      shared_buffers: "256MB"
+      effective_cache_size: "768MB"
+      work_mem: "5MB"
 
-      # WAL archiving
-      archive_mode: "on"
-      archive_timeout: "300s"
-
-      # Logging
-      log_statement: "ddl"
-      log_duration: "on"
-      log_min_duration_statement: "1000"
-      log_checkpoints: "on"
-      log_connections: "on"
-      log_disconnections: "on"
-
-      # Performance monitoring
-      track_activities: "on"
-      track_counts: "on"
-      track_io_timing: "on"
-
-      # Autovacuum
-      autovacuum: "on"
-      autovacuum_max_workers: "3"
-      autovacuum_naptime: "30s"
-
-  # Patroni configuration
+  # Patroni HA configuration
   patroni:
     initdb:
       encoding: "UTF8"
       locale: "en_US.UTF-8"
       data-checksums: "true"
+    synchronous_mode: false  # Async for better write performance in staging
 
-    # Synchronous replication for better data safety
-    synchronous_mode: true
-    synchronous_mode_strict: false  # Allow async if replica is down
-
-    ttl: 30
-    loop_wait: 10
-    retry_timeout: 10
-    maximum_lag_on_failover: 33554432  # 32MB
-
-  # Connection pooler (PGBouncer) - recommended for Supabase
+  # Connection pooler
   connectionPooler:
-    numberOfInstances: 2
+    numberOfInstances: 1
     mode: "transaction"
-    schema: "pooler"
-    user: "pooler"
     resources:
       requests:
-        cpu: 100m
-        memory: 100Mi
+        cpu: 50m
+        memory: 50Mi
       limits:
-        cpu: 500m
-        memory: 500Mi
+        cpu: 200m
+        memory: 200Mi
 
-  # Optional: Backup configuration (uncomment and configure if needed)
-  # env:
-  #   - name: WAL_S3_BUCKET
-  #     value: "supabase-postgres-backups-staging"
-  #   - name: AWS_ENDPOINT
-  #     value: "https://s3.amazonaws.com"
-  #   - name: AWS_ACCESS_KEY_ID
-  #     valueFrom:
-  #       secretKeyRef:
-  #         name: backup-s3-credentials
-  #         key: access-key-id
-  #   - name: AWS_SECRET_ACCESS_KEY
-  #     valueFrom:
-  #       secretKeyRef:
-  #         name: backup-s3-credentials
-  #         key: secret-access-key
-  #   - name: AWS_REGION
-  #     value: "us-east-1"
-  #   - name: BACKUP_SCHEDULE
-  #     value: "0 2 * * *"
-  #   - name: USE_WALG_RESTORE
-  #     value: "true"
-
-  # Optional: Monitoring sidecar
-  sidecars:
-    - name: postgres-exporter
-      image: quay.io/prometheuscommunity/postgres-exporter:latest
-      ports:
-        - name: metrics
-          containerPort: 9187
-          protocol: TCP
-      env:
-        - name: DATA_SOURCE_NAME
-          value: "postgresql://postgres@localhost:5432/postgres?sslmode=disable"
-      resources:
-        requests:
-          cpu: 50m
-          memory: 64Mi
-        limits:
-          cpu: 200m
-          memory: 256Mi
-
----
-# Service for direct PostgreSQL access
-apiVersion: v1
-kind: Service
-metadata:
-  name: supabase-db-direct
-  namespace: supabase
-  labels:
-    app: supabase
-    component: database
-spec:
-  type: ClusterIP
-  selector:
-    application: spilo
-    cluster-name: supabase-db
-    spilo-role: master  # Only route to primary
-  ports:
-    - name: postgresql
-      port: 5432
-      targetPort: 5432
-      protocol: TCP
-
----
-# Service for connection pooler (recommended for Supabase)
-apiVersion: v1
-kind: Service
-metadata:
-  name: supabase-db-pooler
-  namespace: supabase
-  labels:
-    app: supabase
-    component: database-pooler
-spec:
-  type: ClusterIP
-  selector:
-    application: db-connection-pooler
-    cluster-name: supabase-db
-  ports:
-    - name: postgresql
-      port: 5432
-      targetPort: 5432
-      protocol: TCP
+  # Backup configuration
+  env:
+    - name: WAL_S3_BUCKET
+      value: "supabase-postgres-backups"  # TODO: Change to your bucket name
+    - name: AWS_ENDPOINT
+      value: "https://s3.amazonaws.com"  # TODO: Change to your endpoint
+    - name: AWS_REGION
+      value: "us-east-1"  # TODO: Change to your region
+    - name: AWS_ACCESS_KEY_ID
+      valueFrom:
+        secretKeyRef:
+          name: backup-s3-credentials
+          key: access-key-id
+    - name: AWS_SECRET_ACCESS_KEY
+      valueFrom:
+        secretKeyRef:
+          name: backup-s3-credentials
+          key: secret-access-key
+    - name: BACKUP_SCHEDULE
+      value: "0 3 * * *"  # Daily at 3 AM
+    - name: USE_WALG_RESTORE
+      value: "true"

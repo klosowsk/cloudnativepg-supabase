@@ -1,11 +1,16 @@
-# Build custom CloudNativePG image with Supabase extensions via Pigsty
-# Based on official CNPG image with all required Supabase extensions
-# Using Debian Bookworm for full Pigsty extension support
+# Custom Spilo image with Supabase extensions and migrations
+# Extends Zalando's Spilo base image with Pigsty repository for newer extension versions
+#
+# Build: docker build -f Dockerfile.spilo -t ghcr.io/your-org/spilo-supabase:17-1.0.0 .
+# Push:  docker push ghcr.io/your-org/spilo-supabase:17-1.0.0
+#
+# Unlike CloudNativePG which ignores /docker-entrypoint-initdb.d/, Spilo/Patroni
+# actually executes scripts from the image via bootstrap.post_init callback.
 
-ARG PG_MAJOR=15
+ARG SPILO_VERSION=4.0-p3
+ARG PGVERSION=17
 
-# Use Bookworm-based image (Bullseye is deprecated, Bookworm has full Pigsty support)
-FROM ghcr.io/cloudnative-pg/postgresql:${PG_MAJOR}-bookworm
+FROM ghcr.io/zalando/spilo-${PGVERSION}:${SPILO_VERSION}
 
 USER root
 
@@ -21,83 +26,76 @@ RUN apt-get update && apt-get install -y \
     lsb-release \
     && rm -rf /var/lib/apt/lists/*
 
-# Add Pigsty GPG key and infra repository
+# Add Pigsty APT repository for Supabase extensions
+ARG PGVERSION
 RUN mkdir -p /etc/apt/keyrings && \
     curl -fsSL https://repo.pigsty.io/key | gpg --dearmor -o /etc/apt/keyrings/pigsty.gpg && \
-    echo "deb [signed-by=/etc/apt/keyrings/pigsty.gpg] https://repo.pigsty.io/apt/infra generic main" > /etc/apt/sources.list.d/pigsty-infra.list && \
-    apt-get update
+    DISTRO=$(lsb_release -cs) && \
+    echo "deb [signed-by=/etc/apt/keyrings/pigsty.gpg] https://repo.pigsty.io/apt/infra generic main" > /etc/apt/sources.list.d/pigsty-io.list && \
+    echo "deb [signed-by=/etc/apt/keyrings/pigsty.gpg] https://repo.pigsty.io/apt/pgsql/${DISTRO} ${DISTRO} main" >> /etc/apt/sources.list.d/pigsty-io.list && \
+    cat /etc/apt/sources.list.d/pigsty-io.list && \
+    apt-get update && \
+    # Install libsodium dependency (needed by pgsodium)
+    apt-get install -y libsodium23 && \
+    # Install extensions from PGDG (already configured in Spilo)
+    apt-get install -y \
+        postgresql-${PGVERSION}-pgvector \
+        postgresql-${PGVERSION}-cron \
+        postgresql-${PGVERSION}-wal2json \
+        postgresql-${PGVERSION}-postgis-3 \
+        postgresql-${PGVERSION}-pgaudit \
+        postgresql-${PGVERSION}-plpgsql-check \
+        postgresql-${PGVERSION}-pgtap \
+        postgresql-${PGVERSION}-http \
+        && echo "✓ Installed extensions from PGDG" && \
+    # Install Supabase-specific extensions from Pigsty APT repo
+    apt-get install -y \
+        postgresql-${PGVERSION}-pg-net \
+        postgresql-${PGVERSION}-pgsodium \
+        postgresql-${PGVERSION}-vault \
+        postgresql-${PGVERSION}-pg-graphql \
+        postgresql-${PGVERSION}-supautils \
+        postgresql-${PGVERSION}-pg-tle \
+        postgresql-${PGVERSION}-pgjwt \
+        postgresql-${PGVERSION}-pg-jsonschema \
+        postgresql-${PGVERSION}-wrappers \
+        postgresql-${PGVERSION}-pgmq \
+        postgresql-${PGVERSION}-pg-plan-filter \
+        postgresql-${PGVERSION}-pg-wait-sampling \
+        && echo "✓ Installed Supabase extensions from Pigsty"
 
-# Install pig CLI
-RUN apt-get update && apt-get install -y pig && rm -rf /var/lib/apt/lists/*
+# Create directory for Supabase migrations
+RUN mkdir -p /supabase-migrations/custom-init-scripts \
+             /supabase-migrations/init-scripts \
+             /supabase-migrations/migrations
 
-# Remove existing PGDG repo to avoid conflict, then use pig to add both repos
-# Ensure the pgsql repo definition uses the same GPG key
-RUN rm -f /etc/apt/sources.list.d/pgdg.list && \
-    pig repo add pgsql pgdg -u && \
-    sed -i 's/signed-by=[^ ]*/signed-by=\/etc\/apt\/keyrings\/pigsty.gpg/' /etc/apt/sources.list.d/pgsql.list 2>/dev/null || true && \
-    apt-get update
+# Copy Supabase migrations from existing migration structure
+# This structure matches the CloudNativePG approach but will actually work with Spilo
+COPY --chown=postgres:postgres migrations/custom-init-scripts/*.sql /supabase-migrations/custom-init-scripts/
+COPY --chown=postgres:postgres migrations/init-scripts/*.sql /supabase-migrations/init-scripts/
+COPY --chown=postgres:postgres migrations/migrations/*.sql /supabase-migrations/migrations/
 
-# Install CRITICAL Supabase extensions
-# Note: Using direct apt-get with correct package names from Pigsty repo
-ARG PG_MAJOR
-RUN apt-get update && apt-get install -y \
-    postgresql-${PG_MAJOR}-pg-net \
-    postgresql-${PG_MAJOR}-cron \
-    postgresql-${PG_MAJOR}-wal2json \
-    || echo "Some critical extensions failed to install"
+# Copy Supabase-specific initialization script
+# This script runs the migrations in order during Patroni bootstrap
+COPY --chown=postgres:postgres scripts/supabase_post_init.sh /scripts/supabase_post_init.sh
+RUN chmod +x /scripts/supabase_post_init.sh
 
-# Install RECOMMENDED extensions
-RUN apt-get install -y \
-    postgresql-${PG_MAJOR}-pgaudit \
-    postgresql-${PG_MAJOR}-plpgsql-check \
-    postgresql-${PG_MAJOR}-pgtap \
-    || echo "Some recommended extensions failed to install"
-
-# Install OPTIONAL extensions (commonly used)
-RUN apt-get install -y \
-    postgresql-${PG_MAJOR}-pgvector \
-    postgresql-${PG_MAJOR}-postgis-3 \
-    postgresql-${PG_MAJOR}-postgis-3-scripts \
-    postgresql-${PG_MAJOR}-http \
-    || echo "Some optional extensions failed to install"
-
-# Install remaining Supabase extensions
-RUN apt-get install -y \
-    postgresql-${PG_MAJOR}-pgsodium \
-    postgresql-${PG_MAJOR}-pg-graphql \
-    postgresql-${PG_MAJOR}-supautils \
-    postgresql-${PG_MAJOR}-vault \
-    postgresql-${PG_MAJOR}-pg-tle \
-    || echo "Some Supabase-specific extensions not available in current repos"
-
-# Set environment variables to match official Supabase image
-# POSTGRES_USER=supabase_admin - PostgreSQL entrypoint creates this as the initial superuser
-# JWT_EXP defaults to 3600 seconds (1 hour)
-ENV POSTGRES_USER=supabase_admin \
-    JWT_EXP=3600
-
-# Create migration directories
-RUN mkdir -p /docker-entrypoint-initdb.d/init-scripts \
-             /docker-entrypoint-initdb.d/migrations
-
-# Copy Supabase migrations into the image
-# Custom init scripts (won't be overwritten by prepare-init-scripts.sh)
-COPY --chown=postgres:postgres migrations/custom-init-scripts/*.sql /docker-entrypoint-initdb.d/init-scripts/
-# Auto-generated init scripts and migrations
-COPY --chown=postgres:postgres migrations/init-scripts/*.sql /docker-entrypoint-initdb.d/init-scripts/
-COPY --chown=postgres:postgres migrations/migrations/*.sql /docker-entrypoint-initdb.d/migrations/
-# Migration runner script
-COPY --chown=postgres:postgres scripts/migrate.sh /docker-entrypoint-initdb.d/migrate.sh
-
-# Make migrate script executable
-RUN chmod +x /docker-entrypoint-initdb.d/migrate.sh
+# Hook into Spilo's existing post_init.sh
+# Spilo's post_init.sh is called automatically by Patroni during bootstrap
+# We append a call to our Supabase initialization script
+RUN echo "" >> /scripts/post_init.sh && \
+    echo "# Run Supabase-specific initialization" >> /scripts/post_init.sh && \
+    echo "echo 'Running Supabase migrations...'" >> /scripts/post_init.sh && \
+    echo "/scripts/supabase_post_init.sh \"\$@\"" >> /scripts/post_init.sh && \
+    echo "echo 'Supabase migrations completed'" >> /scripts/post_init.sh
 
 # Clean up
 RUN apt-get clean && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
-USER 26
+USER postgres
 
-LABEL org.opencontainers.image.title="CloudNativePG PostgreSQL with Supabase Extensions"
-LABEL org.opencontainers.image.description="CloudNativePG-compatible PostgreSQL image with all Supabase extensions and migrations pre-installed"
-LABEL org.opencontainers.image.source="https://github.com/YOUR_USERNAME/cnpg-supabase"
+LABEL org.opencontainers.image.title="Spilo Supabase"
+LABEL org.opencontainers.image.description="Production-ready PostgreSQL with Supabase extensions and migrations for Kubernetes using Zalando Postgres Operator"
+LABEL org.opencontainers.image.source="https://github.com/klosowsk/spilo-supabase"
 LABEL org.opencontainers.image.licenses="Apache-2.0"
+LABEL org.opencontainers.image.vendor="klosowsk"

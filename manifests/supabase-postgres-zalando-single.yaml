@@ -1,47 +1,45 @@
----
-# Zalando Postgres Operator manifest for Supabase - SINGLE NODE (Development/Testing)
-# This creates a single PostgreSQL instance with all Supabase requirements
-# Suitable for: Local development, testing, CI/CD
+# ============================================================
+# EXAMPLE TEMPLATE - Development (1 node)
+# ============================================================
+# NO HIGH AVAILABILITY - For development/testing only
 #
-# Prerequisites:
-# 1. Zalando Postgres Operator installed in cluster
-# 2. Custom Spilo image available (klosowsk/spilo-supabase:17-latest)
-#
-# Apply: kubectl apply -f manifests/supabase-postgres-zalando-single.yaml
-# Connect: kubectl exec -it supabase-db-dev-0 -n supabase -- psql -U postgres
+# Customize for your environment:
+#   - dockerImage (if using custom registry)
+#   - storageClass
+#   - Backups are optional for dev environments
+# ============================================================
 
 apiVersion: "acid.zalan.do/v1"
 kind: postgresql
 metadata:
-  name: supabase-db-dev
-  namespace: supabase
+  name: supabase-db
+  namespace: supabase  # TODO: Change if using different namespace
   labels:
     app: supabase
     component: database
-    env: development
 spec:
   teamId: "supabase"
   version: "17"
+  numberOfInstances: 1  # No HA
 
-  # Single instance - no HA
-  numberOfInstances: 1
+  # Spilo Supabase image
+  dockerImage: klosowsk/spilo-supabase:17-latest  # TODO: Change to your registry if needed
 
-  dockerImage: klosowsk/spilo-supabase:17-latest
-
-  # Minimal resources for development
+  # Resources per pod
   resources:
     requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
       cpu: 500m
       memory: 1Gi
-    limits:
-      cpu: 1000m
-      memory: 2Gi
 
+  # Storage
   volume:
-    size: 2Gi
-    storageClass: standard  # Adjust for your cluster
+    size: 10Gi                # TODO: Adjust size for your data
+    storageClass: standard    # TODO: Change to your storage class
 
-  # Supabase users - same as production
+  # Supabase roles (auto-created by operator)
   users:
     supabase_admin:
       - superuser
@@ -72,25 +70,16 @@ spec:
   postgresql:
     version: "17"
     parameters:
-      # Required extensions (preload at server start)
+      # Required: Supabase extensions
       shared_preload_libraries: "timescaledb,pgsodium,pg_cron,pg_net,pg_stat_statements,auto_explain,pg_wait_sampling,pg_tle,plan_filter"
       cron.database_name: "postgres"
-
-      # Minimal settings for development
-      max_connections: "100"
-      shared_buffers: "256MB"
-      effective_cache_size: "768MB"
-      maintenance_work_mem: "64MB"
-      work_mem: "4MB"
-
-      # WAL settings
       wal_level: "logical"
-      max_wal_senders: "5"
-      max_replication_slots: "5"
 
-      # Logging
-      log_statement: "ddl"
-      log_min_duration_statement: "1000"
+      # Minimal performance tuning for dev
+      max_connections: "50"
+      shared_buffers: "128MB"
+      effective_cache_size: "384MB"
+      work_mem: "4MB"
 
   # Patroni configuration
   patroni:
@@ -99,24 +88,14 @@ spec:
       locale: "en_US.UTF-8"
       data-checksums: "true"
 
----
-# Service for direct PostgreSQL access
-apiVersion: v1
-kind: Service
-metadata:
-  name: supabase-db-dev
-  namespace: supabase
-  labels:
-    app: supabase
-    component: database
-    env: development
-spec:
-  type: ClusterIP
-  selector:
-    application: spilo
-    cluster-name: supabase-db-dev
-  ports:
-    - name: postgresql
-      port: 5432
-      targetPort: 5432
-      protocol: TCP
+  # Optional: Connection pooler (can be disabled for dev)
+  connectionPooler:
+    numberOfInstances: 1
+    mode: "transaction"
+    resources:
+      requests:
+        cpu: 50m
+        memory: 50Mi
+      limits:
+        cpu: 100m
+        memory: 100Mi
