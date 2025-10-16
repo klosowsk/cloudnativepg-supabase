@@ -2,8 +2,6 @@ name: Build and Push Spilo
 
 on:
   push:
-    branches:
-      - spilo-migration
     tags:
       - 'spilo-v*'
   pull_request:
@@ -12,6 +10,7 @@ on:
       - 'Dockerfile.spilo'
       - 'migrations/**'
       - 'scripts/supabase_post_init.sh'
+  workflow_dispatch:  # Allow manual trigger
 
 jobs:
   build:
@@ -53,13 +52,10 @@ jobs:
             klosowsk/spilo-supabase
             ghcr.io/klosowsk/spilo-supabase
           tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=semver,pattern={{version}},prefix=spilo-v
-            type=semver,pattern={{major}}.{{minor}},prefix=spilo-v
-            type=raw,value=${{ steps.version.outputs.pg_version }}-${{ steps.version.outputs.short_sha }},enable=${{ steps.version.outputs.is_tag == 'false' }}
-            type=raw,value=${{ steps.version.outputs.pg_version }}-latest,enable=${{ steps.version.outputs.is_tag == 'true' }}
-            type=raw,value=latest,enable=${{ steps.version.outputs.is_tag == 'true' }}
+            # Release tags: 17-4.0-p3, 17-latest, latest
+            type=raw,value=${{ steps.version.outputs.full_version }}
+            type=raw,value=${{ steps.version.outputs.pg_version }}-latest
+            type=raw,value=latest
 
       - name: Login to Docker Hub
         if: github.event_name != 'pull_request'
