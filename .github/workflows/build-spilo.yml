@@ -30,8 +30,9 @@ jobs:
         run: |
           if [[ "${GITHUB_REF}" == refs/tags/spilo-v* ]]; then
             VERSION=${GITHUB_REF#refs/tags/spilo-v}
+            # Split on first dash only: 17-4.0-p3 -> PG=17, SPILO=4.0-p3
             PG_VERSION=$(echo $VERSION | cut -d- -f1)
-            SPILO_VERSION=$(echo $VERSION | cut -d- -f2)
+            SPILO_VERSION=$(echo $VERSION | cut -d- -f2-)
             echo "pg_version=${PG_VERSION}" >> $GITHUB_OUTPUT
             echo "spilo_version=${SPILO_VERSION:-4.0-p3}" >> $GITHUB_OUTPUT
             echo "full_version=${VERSION}" >> $GITHUB_OUTPUT
