@@ -1,0 +1,51 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: flowlingo-sandbox-postgres
+spec:
+  instances: 2
+
+  # Custom CNPG image with Supabase extensions
+  imageName: klosowsk/cloudnativepg-supabase:15.0.0
+
+  # Environment variables required by Supabase migrations
+  env:
+    - name: POSTGRES_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: supabase-db-secret
+          key: password
+    - name: JWT_SECRET
+      valueFrom:
+        secretKeyRef:
+          name: supabase-db-secret
+          key: jwt-secret
+    - name: JWT_EXP
+      valueFrom:
+        secretKeyRef:
+          name: supabase-db-secret
+          key: jwt-exp
+
+  storage:
+    size: 2Gi
+    storageClass: local-path
+
+  postgresql:
+    # Required for background worker extensions
+    parameters:
+      shared_preload_libraries: "pg_net,pg_cron"
+      max_connections: "100"
+      shared_buffers: "256MB"
+      # JWT configuration (passed from Secret)
+      # This makes JWT_SECRET available to the initialization scripts
+      supabase.jwt_secret: "${JWT_SECRET}"
+
+  bootstrap:
+    initdb:
+      database: postgres
+      owner: postgres
+      # Run Supabase migrations from ConfigMap
+      postInitApplicationSQLRefs:
+        configMapRefs:
+          - name: supabase-master-init
+            key: 00-master-init.sql

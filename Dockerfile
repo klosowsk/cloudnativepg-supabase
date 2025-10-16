@@ -71,26 +71,19 @@ RUN apt-get install -y \
     || echo "Some Supabase-specific extensions not available in current repos"
 
 # Set environment variables to match official Supabase image
-# POSTGRES_USER=supabase_admin - PostgreSQL entrypoint creates this as the initial superuser
 # JWT_EXP defaults to 3600 seconds (1 hour)
-ENV POSTGRES_USER=supabase_admin \
-    JWT_EXP=3600
-
-# Create migration directories
-RUN mkdir -p /docker-entrypoint-initdb.d/init-scripts \
-             /docker-entrypoint-initdb.d/migrations
+ENV JWT_EXP=3600
 
 # Copy Supabase migrations into the image
-# Custom init scripts (won't be overwritten by prepare-init-scripts.sh)
-COPY --chown=postgres:postgres migrations/custom-init-scripts/*.sql /docker-entrypoint-initdb.d/init-scripts/
-# Auto-generated init scripts and migrations
-COPY --chown=postgres:postgres migrations/init-scripts/*.sql /docker-entrypoint-initdb.d/init-scripts/
-COPY --chown=postgres:postgres migrations/migrations/*.sql /docker-entrypoint-initdb.d/migrations/
-# Migration runner script
-COPY --chown=postgres:postgres scripts/migrate.sh /docker-entrypoint-initdb.d/migrate.sh
-
-# Make migrate script executable
-RUN chmod +x /docker-entrypoint-initdb.d/migrate.sh
+# NOTE: CloudNativePG does NOT use /docker-entrypoint-initdb.d/ for initialization!
+# These files are included for reference and for generating Kubernetes ConfigMaps.
+# Actual initialization happens via postInitSQLRefs in the Cluster manifest.
+# See: examples/cluster.yaml and k8s/supabase-init-configmaps.yaml
+#
+# To generate ConfigMaps from these files, run:
+#   ./scripts/generate-configmaps.sh
+RUN mkdir -p /opt/supabase/migrations
+COPY --chown=postgres:postgres migrations/ /opt/supabase/migrations/
 
 # Clean up
 RUN apt-get clean && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*

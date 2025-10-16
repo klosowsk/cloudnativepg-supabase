@@ -20,52 +20,60 @@ This image follows semantic versioning: `MAJOR.MINOR.PATCH`
 - ✅ **CloudNativePG native** - designed for Kubernetes operators with HA and automatic backups
 - ✅ **Newer extensions** - uses [Pigsty](https://pigsty.io/) repository with latest stable versions
 - ✅ **Complete Supabase schema** - auth, storage, GraphQL, and Edge Functions pre-configured
-- ✅ **Zero-config migrations** - runs automatically on first boot
+- ✅ **Kubernetes-native initialization** - migrations run via ConfigMaps, not Docker entrypoints
+
+**⚠️ Important:** This image is designed exclusively for CloudNativePG in Kubernetes. It does NOT work as a standalone Docker container like the official PostgreSQL images.
 
 ## Quick Start
 
-### Kubernetes (CloudNativePG)
+### Prerequisites
 
-```yaml
-apiVersion: postgresql.cnpg.io/v1
-kind: Cluster
-metadata:
-  name: supabase-db
-spec:
-  instances: 3
-  imageName: klosowsk/cloudnativepg-supabase:15.0.0
+1. **CloudNativePG operator** installed in your Kubernetes cluster
+2. **kubectl** configured to access your cluster
 
-  storage:
-    size: 20Gi
+### Installation
 
-  postgresql:
-    parameters:
-      shared_preload_libraries: "pg_net,pg_cron"
-
-  env:
-    - name: POSTGRES_PASSWORD
-      valueFrom:
-        secretKeyRef:
-          name: supabase-db-secret
-          key: password
-    - name: JWT_SECRET
-      valueFrom:
-        secretKeyRef:
-          name: supabase-db-secret
-          key: jwt-secret
-```
-
-### Docker
+**1. Generate SQL files:**
 
 ```bash
-docker run -d \
-  -e POSTGRES_PASSWORD=postgres \
-  -e JWT_SECRET=your-super-secret-jwt-token-with-at-least-32-characters \
-  -p 5432:5432 \
-  klosowsk/cloudnativepg-supabase:15.0.0
+git clone https://github.com/klosowsk/cloudnativepg-supabase.git
+cd cloudnativepg-supabase
+./scripts/generate-configmaps.sh
 ```
 
-Migrations run automatically on first boot. Check logs: `docker logs -f <container>`
+**2. Configure secrets:**
+
+Edit `k8s/overlays/dev/kustomization.yaml`:
+
+```yaml
+secretGenerator:
+- name: supabase-db-secret
+  literals:
+  - password=YOUR-PASSWORD
+  - jwt-secret=YOUR-JWT-SECRET-MIN-32-CHARS
+```
+
+**3. Deploy:**
+
+```bash
+kubectl apply -k k8s/overlays/dev/
+```
+
+**4. Monitor:**
+
+```bash
+kubectl logs -f supabase-db-1 -n supabase-dev -c postgres
+```
+
+### ArgoCD Deployment
+
+Point your ArgoCD Application to:
+- **Path:** `k8s/overlays/dev`
+- **Namespace:** `supabase-dev`
+
+ArgoCD will automatically generate ConfigMaps from SQL files and deploy.
+
+See [k8s/README.md](k8s/README.md) for details.
 
 ## Configuration
 
@@ -121,14 +129,19 @@ All critical Supabase extensions with newer versions from Pigsty:
 
 ### Migration Execution
 
-Migrations run automatically on first boot (when data directory is empty):
+Migrations run automatically via CloudNativePG's `postInitApplicationSQLRefs` when the cluster is first created:
 
-1. PostgreSQL starts with `supabase_admin` as the initial superuser
-2. Custom init scripts run first: monitoring setup, Edge Functions, utility databases
-3. Supabase migrations run next: auth, storage, realtime schemas
-4. Database is ready with full Supabase functionality
+1. **ConfigMaps deployed** - Migration SQL scripts packaged as Kubernetes ConfigMaps
+2. **Cluster bootstrap** - CloudNativePG creates the cluster and references the ConfigMaps
+3. **Initialization phase** - PostgreSQL runs the master SQL script as superuser:
+   - Phase 1: Custom init scripts (pgbouncer, monitoring, utility databases)
+   - Phase 2: Supabase init scripts (initial schema, roles, extensions)
+   - Phase 3: Supabase migrations (auth, storage, realtime schemas)
+4. **Database ready** - Full Supabase functionality available
 
-**CloudNativePG replicas are safe** - only the primary runs migrations, replicas clone via `pg_basebackup`.
+**CloudNativePG replicas are safe** - only the primary runs initialization, replicas clone via `pg_basebackup`.
+
+**Important:** CloudNativePG images do NOT use `/docker-entrypoint-initdb.d/`. Initialization must be configured via the Cluster manifest's `bootstrap.initdb.postInitApplicationSQLRefs` section.
 
 ## Building and Debugging
 
@@ -137,45 +150,88 @@ Migrations run automatically on first boot (when data directory is empty):
 ```bash
 git clone git@github.com:klosowsk/cloudnativepg-supabase.git
 cd cloudnativepg-supabase
+
+# Prepare migrations (pulls latest from supabase/postgres)
+./scripts/prepare-init-scripts.sh
+
+# Generate ConfigMaps
+./scripts/generate-configmaps.sh
+
+# Build image
 ./build.sh
 ```
 
-### Debug Migrations
+### Troubleshooting
+
+**Cluster stuck in bootstrapping?**
 
 ```bash
-# Start with verbose logging
-docker run --name debug \
-  -e POSTGRES_PASSWORD=test \
-  -e JWT_SECRET=test-secret-with-at-least-32-characters-long \
-  -d klosowsk/cloudnativepg-supabase:15
+# Check cluster status
+kubectl get cluster supabase-db -o yaml
 
-# Watch migration execution
-docker logs -f debug
+# Check pod logs for initialization errors
+kubectl logs supabase-db-1 -c postgres
 
-# Verify extensions installed
-docker exec debug psql -U postgres -c "\dx"
-
-# Check schemas created
-docker exec debug psql -U postgres -c "\dn"
-
-# Cleanup
-docker rm -f debug
+# Common issues:
+# - JWT_SECRET not set in Secret
+# - ConfigMap not created or wrong name
+# - Syntax error in SQL migrations
 ```
 
-### Common Issues
-
 **Migrations not running?**
-- Check logs: `docker logs <container>`
-- Verify data directory is empty on first boot
-- Ensure `JWT_SECRET` is set (required for migrations)
+
+```bash
+# Verify ConfigMap exists
+kubectl get configmap supabase-master-init
+
+# Check if Secret exists
+kubectl get secret supabase-db-secret
+
+# Verify Cluster references the ConfigMap
+kubectl get cluster supabase-db -o jsonpath='{.spec.bootstrap.initdb.postInitApplicationSQLRefs}'
+
+# Check initialization logs
+kubectl logs supabase-db-1 -c postgres | grep -A 50 "Supabase Initialization"
+```
 
 **Extension not available?**
-- Some extensions need `shared_preload_libraries` (see Configuration above)
-- Verify extension installed: `docker exec <container> apt list --installed | grep postgresql-15`
+
+```bash
+# Connect to the database
+kubectl exec -it supabase-db-1 -- psql -U postgres
+
+# List installed extensions
+\dx
+
+# Try creating the extension
+CREATE EXTENSION IF NOT EXISTS pg_net;
+
+# If it fails, check if the package is installed
+kubectl exec -it supabase-db-1 -- apt list --installed | grep postgresql-15
+```
 
 **Permission errors?**
-- Migrations create `supabase_admin` role automatically
-- Check roles: `docker exec <container> psql -U postgres -c "\du"`
+
+```bash
+# List database roles
+kubectl exec -it supabase-db-1 -- psql -U postgres -c "\du"
+
+# Verify supabase_admin exists and is superuser
+kubectl exec -it supabase-db-1 -- psql -U postgres -c "SELECT rolname, rolsuper FROM pg_roles WHERE rolname = 'supabase_admin';"
+```
+
+**Need to re-run migrations?**
+
+CloudNativePG runs `postInitApplicationSQLRefs` only during initial bootstrap. To re-run migrations:
+
+```bash
+# Option 1: Delete and recreate the cluster (loses all data!)
+kubectl delete cluster supabase-db
+kubectl apply -f examples/cluster.yaml
+
+# Option 2: Manually run migrations
+kubectl exec -it supabase-db-1 -- psql -U postgres < <(kubectl get configmap supabase-master-init -o jsonpath='{.data.master-init\.sql}')
+```
 
 ## Comparison with Official Supabase Image
 
