@@ -72,6 +72,46 @@ POSTGRES_USER: authenticator
 POSTGRES_PASSWORD: <from-secret>
 ```
 
+## How It Works: Role Creation Lifecycle
+
+Understanding the bootstrap process helps troubleshoot deployment issues.
+
+### Bootstrap Sequence
+
+1. **Patroni Initialization** - Zalando operator starts Patroni, which initializes PostgreSQL
+2. **Supabase Pre-Creation** (`/supabase-migrations/custom-init-scripts/00-create-supabase-roles.sql`)
+   - Creates all Supabase roles with placeholder passwords
+   - Runs during `post_init` BEFORE operator reconciliation
+   - Allows migrations to reference roles without errors
+3. **Supabase Schema Migrations** - Auth, storage, realtime schemas created
+4. **Bootstrap Completes** - PostgreSQL is running
+5. **Operator Reconciliation** - Zalando operator processes manifest `users:` section
+   - Detects roles already exist from step 2
+   - Updates role attributes (SUPERUSER, CREATEDB, etc.)
+   - Generates secure passwords
+   - Stores credentials in Kubernetes secrets: `{rolename}.supabase-db.credentials.postgresql.acid.zalan.do`
+
+### Why This Design?
+
+**Problem**: Operator creates users AFTER bootstrap, but migrations need them DURING bootstrap.
+
+**Solution**: Pre-create roles early, let operator manage them later.
+
+- **Manifest `users:` section** - Source of truth for role management (KEEP THIS)
+- **Pre-creation script** - Bootstrap helper to prevent migration errors
+- **Operator reconciliation** - Securely manages passwords and attributes throughout cluster lifecycle
+
+### What Gets Created
+
+✅ **Schemas** (created by migrations):
+- `auth`, `storage`, `vault`, `supabase_functions`
+- `realtime`, `graphql`, `graphql_public`
+- `extensions`, `pgbouncer`
+
+⚠️ **Not created** (require external Supabase services):
+- `_analytics` - Requires Supabase Analytics/Logflare service
+- `_realtime` - Requires Supabase Realtime server
+
 ## Verification
 
 ```bash
@@ -85,6 +125,7 @@ kubectl logs supabase-db-0 -n supabase | grep "Supabase"
 kubectl exec -it supabase-db-0 -n supabase -- psql -U postgres
 \dn          -- List schemas (should see auth, storage, realtime, etc.)
 \dx          -- List extensions
+\du          -- List roles (should see all Supabase roles)
 ```
 
 ## Template Customization

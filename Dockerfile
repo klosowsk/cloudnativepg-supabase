@@ -64,6 +64,28 @@ RUN mkdir -p /etc/apt/keyrings && \
         postgresql-${PGVERSION}-pg-wait-sampling \
         && echo "✓ Installed Supabase extensions from Pigsty"
 
+# Create pgsodium getkey script
+# This script is required by pgsodium when loaded via shared_preload_libraries
+# It generates a 32-byte hex-encoded key for server-level encryption
+# For production, consider using AWS KMS, GCP KMS, or another secrets manager
+ARG PGVERSION
+RUN echo '#!/bin/sh' > /usr/share/postgresql/${PGVERSION}/extension/pgsodium_getkey && \
+    echo '# pgsodium getkey script - generates root encryption key' >> /usr/share/postgresql/${PGVERSION}/extension/pgsodium_getkey && \
+    echo '# This uses /dev/urandom for key generation' >> /usr/share/postgresql/${PGVERSION}/extension/pgsodium_getkey && \
+    echo '# The key is loaded into memory at PostgreSQL startup and never exposed to SQL' >> /usr/share/postgresql/${PGVERSION}/extension/pgsodium_getkey && \
+    echo '#' >> /usr/share/postgresql/${PGVERSION}/extension/pgsodium_getkey && \
+    echo '# For production environments, consider:' >> /usr/share/postgresql/${PGVERSION}/extension/pgsodium_getkey && \
+    echo '# - AWS KMS: aws kms decrypt --key-id <key-id> --ciphertext-blob <encrypted-key>' >> /usr/share/postgresql/${PGVERSION}/extension/pgsodium_getkey && \
+    echo '# - GCP KMS: gcloud kms decrypt --key <key> --keyring <keyring> --location <location>' >> /usr/share/postgresql/${PGVERSION}/extension/pgsodium_getkey && \
+    echo '# - Kubernetes Secret: kubectl get secret pgsodium-key -o jsonpath='"'"'{.data.key}'"'"' | base64 -d' >> /usr/share/postgresql/${PGVERSION}/extension/pgsodium_getkey && \
+    echo '# - Vault: vault kv get -field=key secret/pgsodium' >> /usr/share/postgresql/${PGVERSION}/extension/pgsodium_getkey && \
+    echo '#' >> /usr/share/postgresql/${PGVERSION}/extension/pgsodium_getkey && \
+    echo '# The script must output exactly one line containing a 64-character hex string' >> /usr/share/postgresql/${PGVERSION}/extension/pgsodium_getkey && \
+    echo 'od -vN 32 -An -tx1 /dev/urandom | tr -d " \\n"' >> /usr/share/postgresql/${PGVERSION}/extension/pgsodium_getkey && \
+    chmod +x /usr/share/postgresql/${PGVERSION}/extension/pgsodium_getkey && \
+    chown postgres:postgres /usr/share/postgresql/${PGVERSION}/extension/pgsodium_getkey && \
+    echo "✓ Created pgsodium_getkey script"
+
 # Create directory for Supabase migrations
 RUN mkdir -p /supabase-migrations/custom-init-scripts \
              /supabase-migrations/init-scripts \
