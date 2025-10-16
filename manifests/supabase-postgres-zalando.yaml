@@ -29,8 +29,10 @@ spec:
   numberOfInstances: 3
 
   # Custom Spilo image with Supabase extensions and migrations
-  # Build this image using: docker build -f Dockerfile.spilo -t <your-registry>/spilo-supabase:17-1.0.0 .
-  dockerImage: ghcr.io/your-org/spilo-supabase:17-1.0.0
+  # Use pre-built image or build your own (see BUILD.md)
+  dockerImage: klosowsk/spilo-supabase:17-latest
+  # Alternative: ghcr.io/klosowsk/spilo-supabase:17-latest
+  # Or your own: <your-registry>/spilo-supabase:17-latest
 
   # Resources per pod
   resources:

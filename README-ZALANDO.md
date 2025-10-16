@@ -20,10 +20,16 @@ Production-ready PostgreSQL cluster for Supabase with HA, automatic failover, an
 ### 1. Build Custom Spilo Image
 
 ```bash
-# Update registry in command
-docker build -f Dockerfile.spilo -t ghcr.io/your-org/spilo-supabase:17-1.0.0 .
-docker push ghcr.io/your-org/spilo-supabase:17-1.0.0
+# Build locally
+docker build -f Dockerfile.spilo -t spilo-supabase:17-local .
+
+# Or use pre-built from registry
+docker pull klosowsk/spilo-supabase:17-latest
+# or
+docker pull ghcr.io/klosowsk/spilo-supabase:17-latest
 ```
+
+See [BUILD.md](BUILD.md) for detailed build instructions.
 
 ### 2. Install Zalando Operator
 
