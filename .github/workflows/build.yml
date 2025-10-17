@@ -4,12 +4,6 @@ on:
   push:
     tags:
       - 'spilo-v*'
-  pull_request:
-    branches: [main]
-    paths:
-      - 'Dockerfile'
-      - 'migrations/**'
-      - 'scripts/supabase_post_init.sh'
   workflow_dispatch:  # Allow manual trigger
 
 jobs:
