@@ -14,6 +14,12 @@
 
 BEGIN;
 
+-- Create extensions schema and install critical extensions FIRST
+-- This is needed before any other schemas that depend on extensions like uuid-ossp
+CREATE SCHEMA IF NOT EXISTS extensions;
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp" WITH SCHEMA extensions;
+CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA extensions;
+
 -- Core admin role (superuser for Supabase operations)
 DO $$
 BEGIN
@@ -86,6 +92,9 @@ BEGIN
     RAISE NOTICE 'Role already exists: service_role';
   END IF;
 END $$;
+
+-- Grant extensions schema usage to API roles
+GRANT USAGE ON SCHEMA extensions TO postgres, anon, authenticated, service_role;
 
 -- Authenticator role (main connection role that switches to anon/authenticated/service_role)
 DO $$
