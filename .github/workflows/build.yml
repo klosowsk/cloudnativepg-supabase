@@ -45,7 +45,8 @@ jobs:
           # Only Docker Hub for now (GHCR requires additional permissions)
           images: klosowsk/spilo-supabase
           tags: |
-            # Release tags: 17-4.0-p3, 17-latest, latest
+            # Release tags with SHA: 17-4.0-p3-abc1234, 17-4.0-p3, 17-latest, latest
+            type=raw,value=${{ steps.version.outputs.full_version }}-${{ steps.version.outputs.short_sha }}
             type=raw,value=${{ steps.version.outputs.full_version }}
             type=raw,value=${{ steps.version.outputs.pg_version }}-latest
             type=raw,value=latest
