@@ -38,6 +38,12 @@ spec:
     size: 50Gi                # TODO: Adjust size for your data
     storageClass: standard    # TODO: Change to your storage class
 
+  # Security context - Run as non-root postgres user
+  # This fixes volume permission issues
+  spiloRunAsUser: 101      # postgres user UID
+  spiloRunAsGroup: 103     # postgres group GID
+  spiloFSGroup: 103        # Volume group ownership (makes volumes writable)
+
   # Supabase roles (auto-created by operator)
   # Passwords stored in secrets: {username}.supabase-db.credentials.postgresql.acid.zalan.do
   users:
@@ -98,6 +104,20 @@ spec:
       data-checksums: "true"
     synchronous_mode: true
     synchronous_mode_strict: false
+
+  # Environment variables for PostgreSQL pods (from secrets)
+  # These are available during initialization (for JWT config) and at runtime
+  env:
+    - name: JWT_SECRET
+      valueFrom:
+        secretKeyRef:
+          name: supabase-jwt-config
+          key: JWT_SECRET
+    - name: JWT_EXP
+      valueFrom:
+        secretKeyRef:
+          name: supabase-jwt-config
+          key: JWT_EXP
 
   # Connection pooler (recommended for Supabase)
   connectionPooler:
