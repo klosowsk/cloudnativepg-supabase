@@ -1,11 +1,16 @@
-name: Build and Push
+name: Build and Push Spilo
 
 on:
   push:
     tags:
-      - 'v*'
+      - 'spilo-v*'
   pull_request:
     branches: [main]
+    paths:
+      - 'Dockerfile'
+      - 'migrations/**'
+      - 'scripts/supabase_post_init.sh'
+  workflow_dispatch:  # Allow manual trigger
 
 jobs:
   build:
@@ -13,26 +18,43 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Extract PostgreSQL version from tag
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Extract version info
         id: version
         run: |
-          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
-            VERSION=${GITHUB_REF#refs/tags/v}
-            PG_MAJOR=$(echo $VERSION | cut -d. -f1)
-            echo "pg_major=${PG_MAJOR}" >> $GITHUB_OUTPUT
+          if [[ "${GITHUB_REF}" == refs/tags/spilo-v* ]]; then
+            VERSION=${GITHUB_REF#refs/tags/spilo-v}
+            # Split on first dash only: 17-4.0-p3 -> PG=17, SPILO=4.0-p3
+            PG_VERSION=$(echo $VERSION | cut -d- -f1)
+            SPILO_VERSION=$(echo $VERSION | cut -d- -f2-)
+            echo "pg_version=${PG_VERSION}" >> $GITHUB_OUTPUT
+            echo "spilo_version=${SPILO_VERSION:-4.0-p3}" >> $GITHUB_OUTPUT
+            echo "full_version=${VERSION}" >> $GITHUB_OUTPUT
+            echo "is_tag=true" >> $GITHUB_OUTPUT
           else
-            echo "pg_major=15" >> $GITHUB_OUTPUT
+            echo "pg_version=17" >> $GITHUB_OUTPUT
+            echo "spilo_version=4.0-p3" >> $GITHUB_OUTPUT
+            echo "full_version=dev" >> $GITHUB_OUTPUT
+            echo "is_tag=false" >> $GITHUB_OUTPUT
           fi
+          echo "short_sha=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
 
       - name: Docker meta
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: klosowsk/cloudnativepg-supabase
+          # Only Docker Hub for now (GHCR requires additional permissions)
+          images: klosowsk/spilo-supabase
           tags: |
-            type=ref,event=pr
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
+            # Release tags: 17-4.0-p3, 17-latest, latest
+            type=raw,value=${{ steps.version.outputs.full_version }}
+            type=raw,value=${{ steps.version.outputs.pg_version }}-latest
+            type=raw,value=latest
 
       - name: Login to Docker Hub
         if: github.event_name != 'pull_request'
@@ -41,34 +63,78 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build image
+      - name: Build and test
         uses: docker/build-push-action@v5
         with:
           context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
           push: false
-          tags: klosowsk/cloudnativepg-supabase:test
-          load: true
+          load: false
+          tags: spilo-supabase:test
           build-args: |
-            PG_MAJOR=${{ steps.version.outputs.pg_major }}
+            PGVERSION=${{ steps.version.outputs.pg_version }}
+            SPILO_VERSION=${{ steps.version.outputs.spilo_version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build test image for validation
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: spilo-supabase:test
+          build-args: |
+            PGVERSION=${{ steps.version.outputs.pg_version }}
+            SPILO_VERSION=${{ steps.version.outputs.spilo_version }}
 
       - name: Test image
         run: |
           echo "=== Verifying image built successfully ==="
-          docker images | grep cloudnativepg-supabase
+          docker images | grep spilo-supabase
 
           echo "=== Checking PostgreSQL version ==="
-          docker run --rm klosowsk/cloudnativepg-supabase:test postgres --version
+          docker run --rm spilo-supabase:test bash -c "postgres --version"
 
-          echo "=== Verifying extensions are installed ==="
-          docker run --rm klosowsk/cloudnativepg-supabase:test dpkg -l | grep postgresql-${{ steps.version.outputs.pg_major }} | head -20
+          echo "=== Verifying Supabase extensions are installed ==="
+          docker run --rm spilo-supabase:test bash -c "dpkg -l | grep -E 'postgresql-${{ steps.version.outputs.pg_version }}-(pg-net|pgsodium|vault|pg-graphql|supautils|pgvector|pg-tle)'"
 
-      - name: Push to registry
+          echo "=== Checking migration files ==="
+          docker run --rm spilo-supabase:test bash -c "find /supabase-migrations -type f -name '*.sql' | wc -l"
+
+          echo "=== Verifying post_init hook ==="
+          docker run --rm spilo-supabase:test bash -c "tail -5 /scripts/post_init.sh"
+
+          echo "=== Checking supabase_post_init.sh script ==="
+          docker run --rm spilo-supabase:test bash -c "ls -lah /scripts/supabase_post_init.sh"
+
+      - name: Push to registries
         if: github.event_name != 'pull_request'
         uses: docker/build-push-action@v5
         with:
           context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            PG_MAJOR=${{ steps.version.outputs.pg_major }}
+            PGVERSION=${{ steps.version.outputs.pg_version }}
+            SPILO_VERSION=${{ steps.version.outputs.spilo_version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Generate build summary
+        if: github.event_name != 'pull_request'
+        run: |
+          echo "## 🚀 Spilo Supabase Image Built" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**PostgreSQL Version:** ${{ steps.version.outputs.pg_version }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Spilo Version:** ${{ steps.version.outputs.spilo_version }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Image Tags:**" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "${{ steps.meta.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY

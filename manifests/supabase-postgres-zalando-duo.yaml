@@ -1,0 +1,126 @@
+# ============================================================
+# EXAMPLE TEMPLATE - Staging (2 nodes)
+# ============================================================
+# Customize for your environment:
+#   - dockerImage (if using custom registry)
+#   - storageClass
+#   - resources (CPU/memory based on workload)
+#   - backup configuration (S3 bucket, endpoint, credentials)
+# ============================================================
+
+apiVersion: "acid.zalan.do/v1"
+kind: postgresql
+metadata:
+  name: supabase-db
+  namespace: supabase  # TODO: Change if using different namespace
+  labels:
+    app: supabase
+    component: database
+spec:
+  teamId: "supabase"
+  version: "17"
+  numberOfInstances: 2  # 1 primary + 1 replica
+
+  # Spilo Supabase image
+  dockerImage: klosowsk/spilo-supabase:17-latest  # TODO: Change to your registry if needed
+
+  # Resources per pod
+  resources:
+    requests:
+      cpu: 500m       # TODO: Adjust based on workload
+      memory: 1Gi     # TODO: Adjust based on workload
+    limits:
+      cpu: 1000m
+      memory: 2Gi
+
+  # Storage
+  volume:
+    size: 20Gi                # TODO: Adjust size for your data
+    storageClass: standard    # TODO: Change to your storage class
+
+  # Supabase roles (auto-created by operator)
+  users:
+    supabase_admin:
+      - superuser
+      - createdb
+      - createrole
+      - replication
+      - bypassrls
+    service_role:
+      - bypassrls
+    authenticator: []
+    supabase_auth_admin:
+      - createrole
+    supabase_storage_admin:
+      - createrole
+    supabase_functions_admin:
+      - createrole
+    supabase_replication_admin:
+      - replication
+    supabase_read_only_user:
+      - bypassrls
+    anon: []
+    authenticated: []
+
+  databases:
+    postgres: supabase_admin
+
+  # PostgreSQL configuration
+  postgresql:
+    version: "17"
+    parameters:
+      # Required: Supabase extensions
+      shared_preload_libraries: "timescaledb,pgsodium,pg_cron,pg_net,pg_stat_statements,auto_explain,pg_wait_sampling,pg_tle,plan_filter"
+      cron.database_name: "postgres"
+      wal_level: "logical"
+      max_wal_senders: "10"
+      max_replication_slots: "10"
+
+      # Performance tuning
+      max_connections: "100"
+      shared_buffers: "256MB"
+      effective_cache_size: "768MB"
+      work_mem: "5MB"
+
+  # Patroni HA configuration
+  patroni:
+    initdb:
+      encoding: "UTF8"
+      locale: "en_US.UTF-8"
+      data-checksums: "true"
+    synchronous_mode: false  # Async for better write performance in staging
+
+  # Connection pooler
+  connectionPooler:
+    numberOfInstances: 1
+    mode: "transaction"
+    resources:
+      requests:
+        cpu: 50m
+        memory: 50Mi
+      limits:
+        cpu: 200m
+        memory: 200Mi
+
+  # Backup configuration
+  env:
+    - name: WAL_S3_BUCKET
+      value: "supabase-postgres-backups"  # TODO: Change to your bucket name
+    - name: AWS_ENDPOINT
+      value: "https://s3.amazonaws.com"  # TODO: Change to your endpoint
+    - name: AWS_REGION
+      value: "us-east-1"  # TODO: Change to your region
+    - name: AWS_ACCESS_KEY_ID
+      valueFrom:
+        secretKeyRef:
+          name: backup-s3-credentials
+          key: access-key-id
+    - name: AWS_SECRET_ACCESS_KEY
+      valueFrom:
+        secretKeyRef:
+          name: backup-s3-credentials
+          key: secret-access-key
+    - name: BACKUP_SCHEDULE
+      value: "0 3 * * *"  # Daily at 3 AM
+    - name: USE_WALG_RESTORE
+      value: "true"

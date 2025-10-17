@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Build script for CloudNativePG PostgreSQL with Supabase extensions
+# Build script for Spilo PostgreSQL with Supabase extensions
 
-PG_MAJOR=${PG_MAJOR:-15}
-IMAGE_NAME=${IMAGE_NAME:-cnpg-postgres-supabase}
-IMAGE_TAG=${IMAGE_TAG:-${PG_MAJOR}}
+SPILO_VERSION=${SPILO_VERSION:-4.0-p3}
+PG_VERSION=${PG_VERSION:-17}
+IMAGE_NAME=${IMAGE_NAME:-spilo-supabase}
+IMAGE_TAG=${IMAGE_TAG:-${PG_VERSION}-latest}
 REGISTRY=${REGISTRY:-""}
 
 # Full image name
@@ -16,12 +17,14 @@ else
 fi
 
 echo "Building image: $FULL_IMAGE"
-echo "PostgreSQL major version: $PG_MAJOR"
-echo "Base image: ghcr.io/cloudnative-pg/postgresql:${PG_MAJOR}-bookworm"
+echo "PostgreSQL version: $PG_VERSION"
+echo "Spilo version: $SPILO_VERSION"
+echo "Base image: ghcr.io/zalando/spilo-${PG_VERSION}:${SPILO_VERSION}"
 
 # Build the image
 docker build \
-  --build-arg PG_MAJOR="$PG_MAJOR" \
+  --build-arg PGVERSION="$PG_VERSION" \
+  --build-arg SPILO_VERSION="$SPILO_VERSION" \
   -t "$FULL_IMAGE" \
   -f Dockerfile \
   .
@@ -29,8 +32,13 @@ docker build \
 echo ""
 echo "✅ Build complete: $FULL_IMAGE"
 echo ""
+echo "To test the image:"
+echo "  docker run --rm $FULL_IMAGE bash -c 'postgres --version'"
+echo "  docker run --rm $FULL_IMAGE bash -c 'find /supabase-migrations -type f | wc -l'"
+echo ""
 echo "To push to registry:"
 echo "  docker push $FULL_IMAGE"
 echo ""
-echo "To use in cluster.yaml:"
-echo "  imageName: $FULL_IMAGE"
+echo "To use in Zalando PostgreSQL manifest:"
+echo "  dockerImage: $FULL_IMAGE"
+echo ""
