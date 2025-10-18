@@ -5,10 +5,10 @@
 # It runs after Patroni has initialized PostgreSQL and Spilo has set up
 # its default admin roles and extensions.
 #
-# The script runs Supabase migrations in order:
-# 1. custom-init-scripts: Custom setup (pgbouncer, functions, utility databases)
-# 2. init-scripts: Core Supabase schemas (auth, storage, realtime, initial setup)
-# 3. migrations: Incremental Supabase migrations (chronological updates)
+# The script runs Supabase migrations in 3 phases (matching official Supabase structure):
+# Phase 1: zalando-init-scripts - Zalando pre-init (extensions, admin roles)
+# Phase 2: init-scripts - Core schemas (official + custom 00-*, 98-*, 99-*)
+# Phase 3: migrations - Incremental migrations (official timestamped + custom 97-*, 99-*)
 #
 # Arguments (passed from post_init.sh):
 #   $1: HUMAN_ROLE - Admin role name (e.g., "admin")
@@ -53,13 +53,15 @@ echo ""
 # Set psql options for clean execution
 export PGOPTIONS="-c synchronous_commit=local -c search_path=pg_catalog"
 
-# Phase 1: Run custom init scripts
-echo "----------------------------------------"
-echo "Phase 1: Custom Initialization Scripts"
-echo "----------------------------------------"
-CUSTOM_SCRIPTS_DIR="/supabase-migrations/custom-init-scripts"
-if [ -d "$CUSTOM_SCRIPTS_DIR" ]; then
-    for sql_file in "$CUSTOM_SCRIPTS_DIR"/*.sql; do
+# Phase 1: Zalando Pre-Initialization
+echo "========================================"
+echo "Phase 1: Zalando Pre-Initialization"
+echo "========================================"
+echo "Purpose: Create extensions and admin roles BEFORE official scripts"
+echo ""
+ZALANDO_SCRIPTS_DIR="/supabase-migrations/zalando-init-scripts"
+if [ -d "$ZALANDO_SCRIPTS_DIR" ]; then
+    for sql_file in "$ZALANDO_SCRIPTS_DIR"/*.sql; do
         if [ -f "$sql_file" ]; then
             filename=$(basename "$sql_file")
             echo "▶ Running: $filename"
@@ -68,21 +70,24 @@ if [ -d "$CUSTOM_SCRIPTS_DIR" ]; then
         fi
     done
 else
-    echo "⚠️  Custom scripts directory not found: $CUSTOM_SCRIPTS_DIR"
+    echo "⚠️  Zalando scripts directory not found: $ZALANDO_SCRIPTS_DIR"
 fi
 echo ""
 
-# Phase 2: Run init scripts (core schemas)
-echo "----------------------------------------"
+# Phase 2: Core Schema Initialization
+echo "========================================"
 echo "Phase 2: Core Schema Initialization"
-echo "----------------------------------------"
+echo "========================================"
+echo "Purpose: Official Supabase schemas + custom Zalando modifications"
+echo "Running as: supabase_admin (ensures proper schema ownership)"
+echo ""
 INIT_SCRIPTS_DIR="/supabase-migrations/init-scripts"
 if [ -d "$INIT_SCRIPTS_DIR" ]; then
     for sql_file in "$INIT_SCRIPTS_DIR"/*.sql; do
         if [ -f "$sql_file" ]; then
             filename=$(basename "$sql_file")
             echo "▶ Running: $filename"
-            psql -d "$DATABASE" -v ON_ERROR_STOP=1 -f "$sql_file" 2>&1 | sed 's/^/  /'
+            psql -U supabase_admin -d "$DATABASE" -v ON_ERROR_STOP=1 -f "$sql_file" 2>&1 | sed 's/^/  /'
             echo "  ✅ Success"
         fi
     done
@@ -91,24 +96,34 @@ else
 fi
 echo ""
 
-# Phase 3: Run migrations (incremental updates)
-echo "----------------------------------------"
+# Phase 3: Incremental Migrations
+echo "========================================"
 echo "Phase 3: Incremental Migrations"
-echo "----------------------------------------"
+echo "========================================"
+echo "Purpose: Official timestamped migrations + custom late-stage setup"
+echo "Running as: supabase_admin (application superuser)"
+echo ""
 MIGRATIONS_DIR="/supabase-migrations/migrations"
 if [ -d "$MIGRATIONS_DIR" ]; then
-    # Count migrations
-    MIGRATION_COUNT=$(find "$MIGRATIONS_DIR" -name "*.sql" -type f | wc -l)
-    echo "Found $MIGRATION_COUNT migrations to apply"
+    # Count migrations (excluding demote-postgres which is incompatible with Patroni)
+    MIGRATION_COUNT=$(find "$MIGRATIONS_DIR" -name "*.sql" -type f ! -name "*demote-postgres*" | wc -l)
+    echo "Found $MIGRATION_COUNT migrations to apply (skipping demote-postgres for Patroni compatibility)"
     echo ""
 
     MIGRATION_NUM=0
     for sql_file in "$MIGRATIONS_DIR"/*.sql; do
         if [ -f "$sql_file" ]; then
-            MIGRATION_NUM=$((MIGRATION_NUM + 1))
             filename=$(basename "$sql_file")
+
+            # Skip demote-postgres migration - incompatible with Patroni which needs postgres to remain superuser
+            if [[ "$filename" == *"demote-postgres"* ]]; then
+                echo "⏭️  Skipping: $filename (Patroni requires postgres to remain superuser)"
+                continue
+            fi
+
+            MIGRATION_NUM=$((MIGRATION_NUM + 1))
             echo "[$MIGRATION_NUM/$MIGRATION_COUNT] Running: $filename"
-            psql -d "$DATABASE" -v ON_ERROR_STOP=1 -f "$sql_file" 2>&1 | sed 's/^/  /'
+            psql -U supabase_admin -d "$DATABASE" -v ON_ERROR_STOP=1 -f "$sql_file" 2>&1 | sed 's/^/  /'
             echo "  ✅ Success"
         fi
     done
@@ -116,6 +131,17 @@ else
     echo "⚠️  Migrations directory not found: $MIGRATIONS_DIR"
 fi
 echo ""
+
+# Transfer ownership of Spilo-created extension schemas to supabase_admin
+# Note: This is optional since both postgres and supabase_admin are superusers.
+# Uncomment if you need exact schema ownership parity with official Supabase.
+#
+# echo "▶ Transferring extension schema ownership to supabase_admin"
+# for schema in graphql graphql_public realtime vault; do
+#     psql -U supabase_admin -d "$DATABASE" -tAXc "ALTER SCHEMA $schema OWNER TO supabase_admin;" 2>/dev/null || true
+# done
+# echo "  ✅ Schema ownership transferred"
+# echo ""
 
 echo "============================================"
 echo "✅ Supabase initialization completed!"

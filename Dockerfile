@@ -1,14 +1,14 @@
 # Custom Spilo image with Supabase extensions and migrations
 # Extends Zalando's Spilo base image with Pigsty repository for newer extension versions
 #
-# Build: docker build -f Dockerfile.spilo -t ghcr.io/your-org/spilo-supabase:17-1.0.0 .
-# Push:  docker push ghcr.io/your-org/spilo-supabase:17-1.0.0
+# Build: docker build -f Dockerfile -t ghcr.io/your-org/spilo-supabase:15.8.1.085-3.2-p1 .
+# Push:  docker push ghcr.io/your-org/spilo-supabase:15.8.1.085-3.2-p1
 #
 # Unlike CloudNativePG which ignores /docker-entrypoint-initdb.d/, Spilo/Patroni
 # actually executes scripts from the image via bootstrap.post_init callback.
 
-ARG SPILO_VERSION=4.0-p3
-ARG PGVERSION=17
+ARG SPILO_VERSION=3.2-p1
+ARG PGVERSION=15
 
 FROM ghcr.io/zalando/spilo-${PGVERSION}:${SPILO_VERSION}
 
@@ -86,14 +86,20 @@ RUN echo '#!/bin/sh' > /usr/share/postgresql/${PGVERSION}/extension/pgsodium_get
     chown postgres:postgres /usr/share/postgresql/${PGVERSION}/extension/pgsodium_getkey && \
     echo "✓ Created pgsodium_getkey script"
 
-# Create directory for Supabase migrations
-RUN mkdir -p /supabase-migrations/custom-init-scripts \
+# Create directory for Supabase migrations (3-phase structure)
+RUN mkdir -p /supabase-migrations/zalando-init-scripts \
              /supabase-migrations/init-scripts \
              /supabase-migrations/migrations
 
-# Copy Supabase migrations from existing migration structure
-# This structure matches the CloudNativePG approach but will actually work with Spilo
-COPY --chown=postgres:postgres migrations/custom-init-scripts/*.sql /supabase-migrations/custom-init-scripts/
+# Copy Supabase migrations using 3-phase structure:
+# Phase 1: Zalando pre-init (extensions, admin roles)
+# Phase 2: Core schemas (official + custom merged via prepare-init-scripts.sh)
+# Phase 3: Migrations (official timestamped + custom late-stage)
+#
+# Note: init-scripts/ and migrations/ should be prepared by running:
+#       ./scripts/prepare-init-scripts.sh
+#       This pulls official Supabase files and merges custom Zalando modifications
+COPY --chown=postgres:postgres migrations/zalando-init-scripts/*.sql /supabase-migrations/zalando-init-scripts/
 COPY --chown=postgres:postgres migrations/init-scripts/*.sql /supabase-migrations/init-scripts/
 COPY --chown=postgres:postgres migrations/migrations/*.sql /supabase-migrations/migrations/
 

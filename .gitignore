@@ -25,6 +25,7 @@ supabase/
 # Temporary files
 /tmp/
 *.tmp
+.tmp/
 
 # Legacy documentation files
 ARCHITECTURE.md

@@ -19,11 +19,11 @@ metadata:
     component: database
 spec:
   teamId: "supabase"
-  version: "17"
+  version: "15"
   numberOfInstances: 1  # No HA
 
   # Spilo Supabase image
-  dockerImage: klosowsk/spilo-supabase:17-latest  # TODO: Change to your registry if needed
+  dockerImage: klosowsk/spilo-supabase:15.8.1.085-3.2-p1  # TODO: Change to your registry if needed
 
   # Resources per pod
   resources:
@@ -74,7 +74,7 @@ spec:
 
   # PostgreSQL configuration
   postgresql:
-    version: "17"
+    version: "15"
     parameters:
       # Required: Supabase extensions
       shared_preload_libraries: "timescaledb,pgsodium,pg_cron,pg_net,pg_stat_statements,auto_explain,pg_wait_sampling,pg_tle,plan_filter"

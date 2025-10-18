@@ -1,6 +1,11 @@
 -- Supabase Edge Functions Database Webhooks Support
--- Source: supabase/docker/volumes/db/webhooks.sql
--- This creates the infrastructure for database webhooks (database triggers that make HTTP calls)
+-- Source: Official Supabase init-scripts/98-webhooks.sql
+-- Modified for: Zalando/Spilo deployment (matches official exactly)
+--
+-- This file will be copied to init-scripts/ at build time by prepare-init-scripts.sh
+-- Execution: Phase 2 (Core Schema Initialization, runs before 99-*)
+--
+-- Creates the infrastructure for database webhooks (database triggers that make HTTP calls)
 -- Requires pg_net extension to be enabled (via shared_preload_libraries)
 
 BEGIN;

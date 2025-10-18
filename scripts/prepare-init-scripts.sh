@@ -11,6 +11,10 @@ TEMP_DIR="$PROJECT_ROOT/.tmp"
 SUPABASE_POSTGRES_REPO="https://github.com/supabase/postgres.git"
 SUPABASE_POSTGRES_DIR="$TEMP_DIR/supabase-postgres"
 
+# Version to clone - corresponds to supabase/postgres release tag
+# This should match the version used in Supabase's docker-compose
+SUPABASE_VERSION="${SUPABASE_VERSION:-15.8.1.085}"
+
 # Colors for output
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -21,6 +25,7 @@ NC='\033[0m' # No Color
 echo "========================================"
 echo "Supabase Migration Preparation Script"
 echo "========================================"
+echo -e "${BLUE}Supabase Version: ${SUPABASE_VERSION}${NC}"
 echo ""
 
 # Clone or update source repository
@@ -30,13 +35,14 @@ clone_repos() {
     mkdir -p "$TEMP_DIR"
 
     if [ -d "$SUPABASE_POSTGRES_DIR" ]; then
-        echo -e "${YELLOW}Repository exists, updating...${NC}"
+        echo -e "${YELLOW}Repository exists, checking out version ${SUPABASE_VERSION}...${NC}"
         cd "$SUPABASE_POSTGRES_DIR"
-        git pull --quiet
+        git fetch --tags --quiet
+        git checkout "$SUPABASE_VERSION" --quiet
         cd "$PROJECT_ROOT"
     else
-        echo -e "${YELLOW}Cloning supabase/postgres...${NC}"
-        git clone --depth 1 --quiet "$SUPABASE_POSTGRES_REPO" "$SUPABASE_POSTGRES_DIR"
+        echo -e "${YELLOW}Cloning supabase/postgres version ${SUPABASE_VERSION}...${NC}"
+        git clone --depth 1 --branch "$SUPABASE_VERSION" --quiet "$SUPABASE_POSTGRES_REPO" "$SUPABASE_POSTGRES_DIR"
     fi
 
     echo -e "${GREEN}✓ Source repository ready${NC}"
@@ -105,9 +111,48 @@ copy_init_scripts() {
     echo ""
 }
 
+# Copy custom Zalando-specific files
+copy_custom_files() {
+    echo -e "${BLUE}[4/5] Copying custom Zalando-specific files...${NC}"
+    echo ""
+
+    local CUSTOM_INIT_DIR="$PROJECT_ROOT/migrations/custom-init-scripts"
+    local custom_count=0
+
+    # Copy custom files to init-scripts/ (will be executed in Phase 2)
+    echo -e "${YELLOW}Copying custom init-scripts (for Phase 2)${NC}"
+    for filename in 00-schema.sql 98-webhooks.sql 99-jwt.sql 99-roles.sql; do
+        if [ -f "$CUSTOM_INIT_DIR/$filename" ]; then
+            cp "$CUSTOM_INIT_DIR/$filename" "$INIT_SCRIPTS_DIR/$filename"
+            echo -e "  ${GREEN}✓${NC} $filename → init-scripts/"
+            custom_count=$((custom_count + 1))
+        else
+            echo -e "  ${YELLOW}⚠${NC} $filename not found (skipping)"
+        fi
+    done
+
+    echo ""
+
+    # Copy custom files to migrations/ (will be executed in Phase 3)
+    echo -e "${YELLOW}Copying custom late-stage migrations (for Phase 3)${NC}"
+    for filename in 97-_supabase.sql 99-logs.sql 99-pooler.sql 99-realtime.sql; do
+        if [ -f "$CUSTOM_INIT_DIR/$filename" ]; then
+            cp "$CUSTOM_INIT_DIR/$filename" "$MIGRATIONS_DIR/$filename"
+            echo -e "  ${GREEN}✓${NC} $filename → migrations/"
+            custom_count=$((custom_count + 1))
+        else
+            echo -e "  ${YELLOW}⚠${NC} $filename not found (skipping)"
+        fi
+    done
+
+    echo ""
+    echo -e "${GREEN}✓ ${custom_count} custom files copied successfully${NC}"
+    echo ""
+}
+
 # Cleanup temporary directory
 cleanup() {
-    echo -e "${BLUE}[4/4] Cleaning up...${NC}"
+    echo -e "${BLUE}[5/5] Cleaning up...${NC}"
 
     echo -e "${YELLOW}Removing temporary directory${NC}"
     rm -rf "$TEMP_DIR"
@@ -121,6 +166,7 @@ main() {
     clone_repos
     prepare_output_dirs
     copy_init_scripts
+    copy_custom_files
     cleanup
 
     echo "========================================"
@@ -130,6 +176,11 @@ main() {
     echo "Output locations:"
     echo "  - Init scripts: migrations/init-scripts/"
     echo "  - Migrations:   migrations/migrations/"
+    echo ""
+    echo "Migration structure (3-phase execution):"
+    echo "  Phase 1: zalando-init-scripts/ (pre-init, runs first)"
+    echo "  Phase 2: init-scripts/ (core schemas, includes custom 00-*, 98-*, 99-*)"
+    echo "  Phase 3: migrations/ (timestamped + custom 97-*, 99-*)"
     echo ""
     echo "Next steps:"
     echo "  1. Review migrations/"

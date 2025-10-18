@@ -23,16 +23,18 @@ jobs:
         run: |
           if [[ "${GITHUB_REF}" == refs/tags/spilo-v* ]]; then
             VERSION=${GITHUB_REF#refs/tags/spilo-v}
-            # Split on first dash only: 17-4.0-p3 -> PG=17, SPILO=4.0-p3
-            PG_VERSION=$(echo $VERSION | cut -d- -f1)
-            SPILO_VERSION=$(echo $VERSION | cut -d- -f2-)
+            # Parse format: 15.8.1.085-3.2-p1
+            # Split on last dash: 15.8.1.085-3.2-p1 -> PG_SUPABASE=15.8.1.085, SPILO=3.2-p1
+            SPILO_VERSION=$(echo $VERSION | rev | cut -d- -f1,2 | rev)
+            PG_SUPABASE=$(echo $VERSION | rev | cut -d- -f3- | rev)
+            PG_VERSION=$(echo $PG_SUPABASE | cut -d. -f1)
             echo "pg_version=${PG_VERSION}" >> $GITHUB_OUTPUT
-            echo "spilo_version=${SPILO_VERSION:-4.0-p3}" >> $GITHUB_OUTPUT
+            echo "spilo_version=${SPILO_VERSION:-3.2-p1}" >> $GITHUB_OUTPUT
             echo "full_version=${VERSION}" >> $GITHUB_OUTPUT
             echo "is_tag=true" >> $GITHUB_OUTPUT
           else
-            echo "pg_version=17" >> $GITHUB_OUTPUT
-            echo "spilo_version=4.0-p3" >> $GITHUB_OUTPUT
+            echo "pg_version=15" >> $GITHUB_OUTPUT
+            echo "spilo_version=3.2-p1" >> $GITHUB_OUTPUT
             echo "full_version=dev" >> $GITHUB_OUTPUT
             echo "is_tag=false" >> $GITHUB_OUTPUT
           fi
@@ -45,7 +47,7 @@ jobs:
           # Only Docker Hub for now (GHCR requires additional permissions)
           images: klosowsk/spilo-supabase
           tags: |
-            # Release tags with SHA: 17-4.0-p3-abc1234, 17-4.0-p3, 17-latest, latest
+            # Release tags with SHA: 15.8.1.085-3.2-p1-abc1234, 15.8.1.085-3.2-p1, 15-latest, latest
             type=raw,value=${{ steps.version.outputs.full_version }}-${{ steps.version.outputs.short_sha }}
             type=raw,value=${{ steps.version.outputs.full_version }}
             type=raw,value=${{ steps.version.outputs.pg_version }}-latest

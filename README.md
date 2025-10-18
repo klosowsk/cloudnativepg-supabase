@@ -4,7 +4,7 @@
 
 A custom [Spilo](https://github.com/zalando/spilo) image with all Supabase extensions and migrations pre-installed. Deploy with [Zalando Postgres Operator](https://github.com/zalando/postgres-operator) for production-ready HA PostgreSQL clusters.
 
-> Schemas, extensions, and migrations are sourced from the [official Supabase repositories](https://github.com/supabase/postgres).
+> Based on **PostgreSQL 15.8** with **Supabase 1.085** compatibility. Schemas, extensions, and migrations are sourced from the [official Supabase postgres repository](https://github.com/supabase/postgres) tag `15.8.1.085`.
 
 ## What You Get
 
@@ -49,7 +49,9 @@ helm install postgres-operator postgres-operator-charts/postgres-operator \
 ### 2. Use Pre-Built Image
 
 ```bash
-docker pull klosowsk/spilo-supabase:17-latest
+docker pull klosowsk/spilo-supabase:15.8.1.085-3.2-p1
+# Or use the latest tag for PG15
+docker pull klosowsk/spilo-supabase:15-latest
 ```
 
 Or build your own:
@@ -112,6 +114,7 @@ kubectl exec -it supabase-db-0 -n supabase -- psql -U postgres
 
 ## Documentation
 
+- [Migration Structure](documentation/migration-structure.md) - How Supabase initialization works
 - [Architecture Overview](documentation/architecture.md) - What's included
 - [Build Guide](documentation/build-guide.md) - How to build the image
 - [Deployment Guide](documentation/deployment-guide.md) - Deployment and operations
