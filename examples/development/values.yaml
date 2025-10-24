@@ -13,7 +13,7 @@ postgresql:
   numberOfInstances: 1  # Single instance for dev
 
   # Use the newly built image (with registry for remote clusters)
-  dockerImage: klosowsk/spilo-supabase:15.8.1.085-3.2-p1-86ed380
+  dockerImage: klosowsk/spilo-supabase:15.8.1.085-3.2-p1-1427ca6
 
   # Minimal resources
   resources:

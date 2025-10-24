@@ -14,7 +14,7 @@ postgresql:
   numberOfInstances: 3  # 1 primary + 2 replicas (adjust as needed)
 
   # Use your built image (update tag as needed)
-  dockerImage: klosowsk/spilo-supabase:15.8.1.085-3.2-p1
+  dockerImage: klosowsk/spilo-supabase:15.8.1.085-3.2-p1-1427ca6
 
   # Resource allocation - adjust based on your workload
   resources:
