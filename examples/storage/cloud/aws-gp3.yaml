@@ -1,0 +1,86 @@
+# AWS EBS gp3 StorageClass for Supabase PostgreSQL
+#
+# gp3 is the latest generation general purpose SSD with predictable performance.
+# Recommended for production PostgreSQL workloads on AWS EKS.
+#
+# Prerequisites:
+# - AWS EBS CSI Driver must be installed in your EKS cluster
+# - See: https://docs.aws.amazon.com/eks/latest/userguide/ebs-csi.html
+#
+# Features:
+# - Automatic volume provisioning in AWS
+# - 3000 IOPS baseline (configurable up to 16000)
+# - 125 MB/s throughput baseline (configurable up to 1000 MB/s)
+# - More cost-effective than gp2
+#
+# Performance:
+# - gp3: 3000 IOPS, 125 MB/s baseline (independent of size)
+# - gp2: IOPS scale with size (3 IOPS per GB, max 16000)
+#
+# Usage:
+# 1. Install EBS CSI driver in your EKS cluster
+# 2. Apply this StorageClass: kubectl apply -f aws-gp3.yaml
+# 3. Deploy Supabase with: postgresql.volume.storageClass=aws-gp3
+
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: aws-gp3
+  labels:
+    app: supabase
+    component: storage
+provisioner: ebs.csi.aws.com
+allowVolumeExpansion: true  # Allow volume resizing without downtime
+reclaimPolicy: Retain       # Keep EBS volume when PVC deleted (safety)
+volumeBindingMode: WaitForFirstConsumer  # Create volume in same AZ as pod
+parameters:
+  type: gp3
+  fsType: ext4
+  encrypted: "true"  # Enable EBS encryption (recommended for production)
+
+  # Performance tuning (optional)
+  iops: "3000"       # Baseline: 3000 (can increase up to 16000)
+  throughput: "125"  # MB/s baseline: 125 (can increase up to 1000)
+
+  # Tags (optional - for cost tracking)
+  # tagSpecification_1: "key1=value1"
+  # tagSpecification_2: "key2=value2"
+
+---
+# Alternative: High-performance gp3 for large production databases
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: aws-gp3-high-perf
+  labels:
+    app: supabase
+    component: storage
+provisioner: ebs.csi.aws.com
+allowVolumeExpansion: true
+reclaimPolicy: Retain
+volumeBindingMode: WaitForFirstConsumer
+parameters:
+  type: gp3
+  fsType: ext4
+  encrypted: "true"
+  iops: "16000"      # Maximum IOPS for gp3
+  throughput: "1000"  # Maximum throughput (1 GB/s)
+
+---
+# Alternative: io2 for mission-critical workloads with guaranteed IOPS
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: aws-io2
+  labels:
+    app: supabase
+    component: storage
+provisioner: ebs.csi.aws.com
+allowVolumeExpansion: true
+reclaimPolicy: Retain
+volumeBindingMode: WaitForFirstConsumer
+parameters:
+  type: io2
+  fsType: ext4
+  encrypted: "true"
+  iops: "64000"  # io2 supports up to 64000 IOPS (256000 for io2 Block Express)

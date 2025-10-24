@@ -1,0 +1,471 @@
+# High Availability Environment - Supabase HA
+# Production-ready setup with multiple replicas and synchronous replication
+# NOTE: Adjust resources and replica counts based on your specific requirements
+
+global:
+  clusterName: "ha-supabase-db"
+  autoDiscoverSecrets: true
+
+# PostgreSQL Configuration - High Availability
+postgresql:
+  enabled: true
+  teamId: "supabase-ha"
+  version: "15"
+  numberOfInstances: 3  # 1 primary + 2 replicas (adjust as needed)
+
+  # Use your built image (update tag as needed)
+  dockerImage: klosowsk/spilo-supabase:15.8.1.085-3.2-p1
+
+  # Resource allocation - adjust based on your workload
+  resources:
+    requests:
+      cpu: 2000m
+      memory: 4Gi
+    limits:
+      cpu: 4000m
+      memory: 8Gi
+
+  # Storage configuration
+  volume:
+    size: 100Gi
+    storageClass: fast-ssd  # CHANGE THIS: Use your StorageClass (see examples/storage/)
+
+  # Run as postgres user
+  spiloRunAsUser: 101
+  spiloRunAsGroup: 103
+  spiloFSGroup: 103
+
+  # Supabase users with appropriate privileges
+  users:
+    supabase_admin:
+      - superuser
+      - createdb
+      - createrole
+      - replication
+      - bypassrls
+    service_role:
+      - bypassrls
+    authenticator: []
+    supabase_auth_admin:
+      - createrole
+    supabase_storage_admin:
+      - createrole
+    supabase_functions_admin:
+      - createrole
+    supabase_replication_admin:
+      - replication
+    supabase_etl_admin:
+      - replication
+    supabase_read_only_user:
+      - bypassrls
+    anon: []
+    authenticated: []
+    dashboard_user:
+      - createdb
+      - createrole
+
+  databases:
+    postgres: supabase_admin
+
+  # PostgreSQL configuration tuned for HA
+  parameters:
+    # Required extensions (preload at server start)
+    shared_preload_libraries: "pgsodium,timescaledb,pg_cron,pg_net,pg_stat_statements,auto_explain,pg_wait_sampling,pg_tle,plan_filter"
+    pgsodium.getkey_script: "/usr/share/postgresql/15/extension/pgsodium_getkey"
+    cron.database_name: "postgres"
+
+    # Connection settings
+    max_connections: "300"
+
+    # Memory settings - tuned for 8GB limit
+    shared_buffers: "2GB"
+    effective_cache_size: "6GB"
+    work_mem: "10MB"
+    maintenance_work_mem: "512MB"
+
+    # WAL settings for replication
+    wal_level: "logical"
+    max_wal_senders: "10"
+    max_replication_slots: "10"
+    max_logical_replication_workers: "4"
+
+    # Checkpoint settings
+    checkpoint_timeout: "15min"
+    checkpoint_completion_target: "0.9"
+
+    # WAL archiving
+    archive_mode: "on"
+    archive_timeout: "300s"
+
+    # Logging
+    log_statement: "ddl"
+    log_min_duration_statement: "1000"
+    log_checkpoints: "on"
+    log_connections: "on"
+    log_disconnections: "on"
+
+    # Performance monitoring
+    track_activities: "on"
+    track_counts: "on"
+    track_io_timing: "on"
+
+    # Autovacuum
+    autovacuum: "on"
+    autovacuum_max_workers: "3"
+    autovacuum_naptime: "60s"
+
+  # Patroni configuration
+  patroni:
+    initdb:
+      encoding: "UTF8"
+      locale: "en_US.UTF-8"
+      data-checksums: "true"
+
+    # Synchronous replication for HA
+    synchronous_mode: true
+    synchronous_mode_strict: false
+
+    ttl: 30
+    loop_wait: 10
+    retry_timeout: 10
+    maximum_lag_on_failover: 33554432  # 32MB
+
+    # Production pg_hba rules (allow both SSL and non-SSL for flexibility)
+    pg_hba:
+      - local all all trust
+      - local replication standby trust
+      - hostssl all all all md5
+      - hostnossl all all all md5
+      - hostnossl replication standby all md5
+
+  # Environment variables for PostgreSQL pods (from secrets)
+  env: []
+
+  # Connection pooler (PGBouncer)
+  connectionPooler:
+    enabled: true
+    numberOfInstances: 3
+    mode: "transaction"
+    schema: "pooler"
+    user: "pooler"
+    resources:
+      requests:
+        cpu: 200m
+        memory: 256Mi
+      limits:
+        cpu: 1000m
+        memory: 1Gi
+
+  # Optional: Backup configuration (requires S3/MinIO)
+  # env:
+  #   - name: WAL_S3_BUCKET
+  #     value: "supabase-ha-backups"
+  #   - name: AWS_ENDPOINT
+  #     value: "https://s3.amazonaws.com"
+  #   - name: AWS_REGION
+  #     value: "us-east-1"
+  #   - name: AWS_ACCESS_KEY_ID
+  #     valueFrom:
+  #       secretKeyRef:
+  #         name: backup-s3-credentials
+  #         key: access-key-id
+  #   - name: AWS_SECRET_ACCESS_KEY
+  #     valueFrom:
+  #       secretKeyRef:
+  #         name: backup-s3-credentials
+  #         key: secret-access-key
+  #   - name: BACKUP_SCHEDULE
+  #     value: "0 2 * * *"  # Daily at 2 AM
+
+  # Optional: Monitoring sidecar for Prometheus metrics
+  # sidecars:
+  #   - name: postgres-exporter
+  #     image: quay.io/prometheuscommunity/postgres-exporter:latest
+  #     ports:
+  #       - name: metrics
+  #         containerPort: 9187
+  #         protocol: TCP
+  #     env:
+  #       - name: DATA_SOURCE_NAME
+  #         value: "postgresql://postgres@localhost:5432/postgres?sslmode=disable"
+  #     resources:
+  #       requests:
+  #         cpu: 50m
+  #         memory: 64Mi
+  #       limits:
+  #         cpu: 200m
+  #         memory: 256Mi
+
+# Supabase Secrets - IMPORTANT: Generate secure keys for production
+secret:
+  jwt:
+    # REQUIRED: Generate secure JWT tokens
+    # Use: https://supabase.com/docs/guides/self-hosting#api-keys
+    anonKey: ""       # REQUIRED: Set your anon key
+    serviceKey: ""    # REQUIRED: Set your service key
+    secret: ""        # REQUIRED: Set your JWT secret (32+ chars)
+
+  dashboard:
+    username: "admin"
+    password: ""      # REQUIRED: Set a strong password
+
+  analytics:
+    apiKey: ""        # REQUIRED: Generate random base64 string
+    publicApiKey: ""  # Optional
+    privateApiKey: "" # Optional
+
+  smtp:
+    username: ""      # Optional: Your SMTP username
+    password: ""      # Optional: Your SMTP password
+
+# Service Configuration - Multiple replicas for HA
+studio:
+  enabled: true
+  replicaCount: 2
+
+  # POSTGRES_PASSWORD will be auto-discovered from Zalando secret (postgres user)
+
+  environment:
+    # Binds nestjs listener to both IPv4 and IPv6 network interfaces
+    HOSTNAME: "::"
+
+    # Self-hosted Postgres connection (required for Studio 2025.10.09+)
+    POSTGRES_HOST: ha-supabase-db
+    POSTGRES_PORT: "5432"
+    POSTGRES_DB: postgres
+
+    # Public URL (must match how users access Studio)
+    SUPABASE_PUBLIC_URL: https://api.yourdomain.com  # CHANGE THIS
+
+    # Studio organization and project
+    STUDIO_DEFAULT_ORGANIZATION: "Production"
+    STUDIO_DEFAULT_PROJECT: "ha-supabase"
+
+  # Optional: Configure ingress for external access
+  # ingress:
+  #   enabled: true
+  #   className: nginx
+  #   annotations:
+  #     cert-manager.io/cluster-issuer: "letsencrypt-prod"
+  #   hosts:
+  #     - host: studio.yourdomain.com
+  #       paths:
+  #         - path: /
+  #           pathType: Prefix
+  #   tls:
+  #     - secretName: studio-tls
+  #       hosts:
+  #         - studio.yourdomain.com
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+auth:
+  enabled: true
+  replicaCount: 3
+  environment:
+    # DB connection (DB_HOST and DB_PASSWORD auto-injected by template)
+    GOTRUE_DB_DRIVER: postgres
+    DB_USER: supabase_auth_admin
+    DB_PORT: "5432"
+    DB_SSL: disable
+
+    # External URLs - CHANGE THESE
+    API_EXTERNAL_URL: https://api.yourdomain.com
+    GOTRUE_SITE_URL: https://api.yourdomain.com
+
+    # Disable auto-confirm for production
+    GOTRUE_MAILER_AUTOCONFIRM: "false"
+
+    # SMTP configuration (required for production)
+    # GOTRUE_SMTP_HOST: "smtp.yourmailprovider.com"
+    # GOTRUE_SMTP_PORT: "587"
+    # GOTRUE_SMTP_ADMIN_EMAIL: "noreply@yourdomain.com"
+
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 512Mi
+
+rest:
+  enabled: true
+  replicaCount: 3
+  environment:
+    # DB connection (DB_HOST and DB_PASSWORD auto-injected by template)
+    DB_DRIVER: postgres
+    DB_USER: authenticator
+    DB_PORT: "5432"
+    DB_SSL: disable
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 512Mi
+
+realtime:
+  enabled: true
+  replicaCount: 3
+  environment:
+    # DB connection (DB_HOST and DB_PASSWORD auto-injected by template)
+    DB_USER: supabase_admin
+    DB_PORT: "5432"
+    DB_SSL: "false"
+    DB_AFTER_CONNECT_QUERY: "SET search_path TO _realtime"
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 512Mi
+
+meta:
+  enabled: true
+  replicaCount: 2
+  environment:
+    # DB connection (DB_HOST and DB_PASSWORD auto-injected by template)
+    DB_USER: supabase_admin
+    DB_PORT: "5432"
+    DB_SSL: disable
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+storage:
+  enabled: true
+  replicaCount: 3
+  persistence:
+    enabled: true
+    size: 100Gi
+    storageClass: fast-ssd  # CHANGE THIS: Use your StorageClass
+  environment:
+    # DB connection (DB_HOST and DB_PASSWORD auto-injected by template)
+    DB_DRIVER: postgres
+    DB_USER: supabase_storage_admin
+    DB_PORT: "5432"
+    DB_SSL: disable
+
+    # Optional: S3 storage backend
+    # STORAGE_BACKEND: s3
+    # GLOBAL_S3_ENDPOINT: https://s3.amazonaws.com
+    # GLOBAL_S3_BUCKET: your-supabase-storage-bucket
+    # AWS_DEFAULT_REGION: us-east-1
+
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+
+imgproxy:
+  enabled: true
+  replicaCount: 2
+  persistence:
+    enabled: false
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+
+kong:
+  enabled: true
+  replicaCount: 3
+  environment:
+    KONG_LOG_LEVEL: info
+
+  # Optional: Configure ingress for external access
+  # ingress:
+  #   enabled: true
+  #   className: nginx
+  #   annotations:
+  #     cert-manager.io/cluster-issuer: "letsencrypt-prod"
+  #     nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+  #   hosts:
+  #     - host: api.yourdomain.com
+  #       paths:
+  #         - path: /
+  #           pathType: Prefix
+  #   tls:
+  #     - secretName: api-tls
+  #       hosts:
+  #         - api.yourdomain.com
+
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 512Mi
+
+analytics:
+  enabled: true
+  replicaCount: 2
+  environment:
+    # DB connection (DB_HOST and DB_PASSWORD auto-injected by template)
+    DB_DRIVER: postgres
+    DB_USERNAME: postgres
+    DB_SCHEMA: _analytics
+    DB_PORT: "5432"
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+
+vector:
+  enabled: true
+  replicaCount: 2
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+functions:
+  enabled: true
+  replicaCount: 3
+  environment:
+    # DB connection (DB_HOST and DB_PASSWORD auto-injected by template)
+    DB_DRIVER: postgres
+    DB_USERNAME: postgres
+    DB_PORT: "5432"
+    DB_SSL: disable
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+
+# Disable optional services
+minio:
+  enabled: false
+
+# Supavisor - Alternative connection pooler (optional)
+supavisor:
+  enabled: false  # Use PgBouncer (connectionPooler) instead

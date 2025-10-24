@@ -1,0 +1,96 @@
+# Azure Disk StorageClass for Supabase PostgreSQL
+#
+# Azure Managed Disks provide persistent storage for AKS clusters.
+# Premium SSD (Premium_LRS) is recommended for production PostgreSQL workloads.
+#
+# Prerequisites:
+# - Azure Disk CSI Driver (pre-installed in AKS 1.21+)
+# - See: https://learn.microsoft.com/en-us/azure/aks/azure-disk-csi
+#
+# Disk Types:
+# - Premium_LRS: SSD, best performance (RECOMMENDED for PostgreSQL)
+# - StandardSSD_LRS: Standard SSD, balanced performance
+# - Standard_LRS: HDD, lowest cost (NOT recommended for databases)
+# - Premium_ZRS: Zone-redundant SSD (high availability)
+#
+# Usage:
+# 1. Verify CSI driver: kubectl get pods -n kube-system | grep csi-azuredisk
+# 2. Apply this StorageClass: kubectl apply -f azure-disk.yaml
+# 3. Deploy Supabase with: postgresql.volume.storageClass=azure-disk-premium
+
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: azure-disk-premium
+  labels:
+    app: supabase
+    component: storage
+provisioner: disk.csi.azure.com
+allowVolumeExpansion: true    # Allow volume resizing
+reclaimPolicy: Retain         # Keep disk when PVC deleted
+volumeBindingMode: WaitForFirstConsumer  # Create disk in same zone as pod
+parameters:
+  skuName: Premium_LRS        # Premium SSD (locally-redundant)
+  kind: managed
+  fsType: ext4
+  cachingMode: ReadOnly       # Recommended for databases (ReadOnly or None)
+
+---
+# Alternative: Zone-redundant premium SSD for maximum HA
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: azure-disk-premium-zrs
+  labels:
+    app: supabase
+    component: storage
+provisioner: disk.csi.azure.com
+allowVolumeExpansion: true
+reclaimPolicy: Retain
+volumeBindingMode: WaitForFirstConsumer
+parameters:
+  skuName: Premium_ZRS  # Zone-redundant storage (replicated across 3 zones)
+  kind: managed
+  fsType: ext4
+  cachingMode: ReadOnly
+
+---
+# Alternative: Standard SSD for non-production workloads
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: azure-disk-standard-ssd
+  labels:
+    app: supabase
+    component: storage
+provisioner: disk.csi.azure.com
+allowVolumeExpansion: true
+reclaimPolicy: Retain
+volumeBindingMode: WaitForFirstConsumer
+parameters:
+  skuName: StandardSSD_LRS  # Standard SSD (lower cost, lower IOPS)
+  kind: managed
+  fsType: ext4
+  cachingMode: ReadOnly
+
+---
+# Performance Comparison (Azure Managed Disks)
+#
+# Premium_LRS (P10 - 128 GiB):
+#   - IOPS: 500
+#   - Throughput: 100 MB/s
+#   - Use case: Development, small databases
+#
+# Premium_LRS (P30 - 1024 GiB):
+#   - IOPS: 5000
+#   - Throughput: 200 MB/s
+#   - Use case: Production databases
+#
+# Premium_LRS (P50 - 4096 GiB):
+#   - IOPS: 7500
+#   - Throughput: 250 MB/s
+#   - Use case: Large production databases
+#
+# Premium_ZRS: Same performance as Premium_LRS but replicated across zones
+#
+# See full specs: https://learn.microsoft.com/en-us/azure/virtual-machines/disks-types

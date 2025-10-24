@@ -1,0 +1,37 @@
+# Longhorn StorageClass for Supabase PostgreSQL
+#
+# Longhorn provides distributed block storage with replication across nodes.
+# Perfect for on-premise Kubernetes clusters requiring HA without cloud providers.
+#
+# Prerequisites:
+# - Longhorn must be installed in your cluster
+# - See: https://longhorn.io/docs/latest/deploy/install/
+#
+# Features:
+# - Automatic volume provisioning
+# - Data replicated across multiple nodes
+# - Snapshots and backups
+# - Volume migration between nodes
+#
+# Usage:
+# 1. Ensure Longhorn is installed: kubectl get pods -n longhorn-system
+# 2. Apply this StorageClass: kubectl apply -f longhorn-storageclass.yaml
+# 3. Deploy Supabase with: postgresql.volume.storageClass=longhorn
+
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: longhorn
+  labels:
+    app: supabase
+    component: storage
+provisioner: driver.longhorn.io  # Longhorn CSI driver
+allowVolumeExpansion: true       # Allow volume resizing
+reclaimPolicy: Retain            # Keep volume when PVC deleted
+volumeBindingMode: Immediate     # Create volume immediately when PVC created
+parameters:
+  numberOfReplicas: "2"          # Replicate data across 2 nodes (HA)
+  staleReplicaTimeout: "30"      # Remove stale replicas after 30 minutes
+  fromBackup: ""                 # Optional: restore from backup
+  fsType: "ext4"                 # Filesystem type
+  dataLocality: "disabled"       # "disabled" = data on any node, "best-effort" = prefer local node

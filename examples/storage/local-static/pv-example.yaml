@@ -1,0 +1,107 @@
+# PersistentVolumes for Supabase PostgreSQL Cluster
+#
+# IMPORTANT: This is a TEMPLATE - you must customize it for your environment!
+#
+# Instructions:
+# 1. Determine how many PostgreSQL instances you need (set in values.yaml: postgresql.numberOfInstances)
+# 2. Create ONE PV per instance (copy/paste this template)
+# 3. Update for each PV:
+#    - metadata.name (must be unique: pv-0, pv-1, pv-2, etc.)
+#    - spec.hostPath.path (local directory on the node)
+#    - spec.nodeAffinity.values (node hostname where PV will be created)
+# 4. Ensure the hostPath directories exist on each node (or use type: DirectoryOrCreate)
+# 5. Apply: kubectl apply -f pv-example.yaml
+#
+# Example: For a 2-instance HA cluster (1 primary + 1 replica), create 2 PVs
+
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: supabase-db-pv-0  # CHANGE: Unique name for PV 0
+  labels:
+    app: supabase
+    component: database
+    instance: "0"  # Helps identify which PV is for which instance
+spec:
+  capacity:
+    storage: 20Gi  # CHANGE: Match your values.yaml postgresql.volume.size
+  accessModes:
+    - ReadWriteOnce  # Single node can mount this volume
+  persistentVolumeReclaimPolicy: Retain  # Keep data when PVC deleted
+  storageClassName: supabase-local  # CHANGE: Must match your StorageClass name
+  hostPath:
+    path: /mnt/data/supabase/pgdata-0  # CHANGE: Local path on the node
+    type: DirectoryOrCreate  # Creates directory if it doesn't exist
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: kubernetes.io/hostname
+              operator: In
+              values:
+                - k3s-worker-01  # CHANGE: Node hostname where this PV will be created
+
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: supabase-db-pv-1  # CHANGE: Unique name for PV 1
+  labels:
+    app: supabase
+    component: database
+    instance: "1"
+spec:
+  capacity:
+    storage: 20Gi  # CHANGE: Must match PV-0 size
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: supabase-local  # CHANGE: Must match your StorageClass
+  hostPath:
+    path: /mnt/data/supabase/pgdata-1  # CHANGE: Different path for PV 1
+    type: DirectoryOrCreate
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: kubernetes.io/hostname
+              operator: In
+              values:
+                - k3s-worker-02  # CHANGE: Different node for HA (avoid single point of failure)
+
+# ---
+# For 3+ instances, add more PVs here following the same pattern:
+# - Increment the PV number (pv-2, pv-3, etc.)
+# - Use different hostPath on each node
+# - Distribute across nodes for HA
+
+# Uncomment below for a 3-instance cluster:
+
+# ---
+# apiVersion: v1
+# kind: PersistentVolume
+# metadata:
+#   name: supabase-db-pv-2
+#   labels:
+#     app: supabase
+#     component: database
+#     instance: "2"
+# spec:
+#   capacity:
+#     storage: 20Gi
+#   accessModes:
+#     - ReadWriteOnce
+#   persistentVolumeReclaimPolicy: Retain
+#   storageClassName: supabase-local
+#   hostPath:
+#     path: /mnt/data/supabase/pgdata-2
+#     type: DirectoryOrCreate
+#   nodeAffinity:
+#     required:
+#       nodeSelectorTerms:
+#         - matchExpressions:
+#             - key: kubernetes.io/hostname
+#               operator: In
+#               values:
+#                 - k3s-worker-03

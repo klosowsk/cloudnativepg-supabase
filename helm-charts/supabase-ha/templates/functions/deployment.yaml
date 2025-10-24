@@ -1,0 +1,139 @@
+{{- if .Values.functions.enabled -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "supabase-ha.functions.fullname" . }}
+  labels:
+    {{- include "supabase-ha.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.functions.autoscaling.enabled }}
+  replicas: {{ .Values.functions.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "supabase-ha.functions.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.functions.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "supabase-ha.functions.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.functions.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "supabase-ha.functions.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.functions.podSecurityContext | nindent 8 }}
+      containers:
+        - args:
+            - start
+            - --main-service
+            - /home/deno/functions/main
+          name: {{ include "supabase-ha.functions.name" $ }}
+          securityContext:
+            {{- toYaml .Values.functions.securityContext | nindent 12 }}
+          image: "{{ .Values.functions.image.repository }}:{{ .Values.functions.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.functions.image.pullPolicy }}
+          env:
+            {{- range $key, $value := .Values.functions.environment }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+            - name: DB_HOSTNAME
+              {{- if .Values.postgresql.enabled }}
+              value: {{ include "supabase-ha.db.fullname" . }}
+              {{- else }}
+              value: $(DB_HOST)
+              {{- end }}
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "supabase-ha.dbSecretRef" (dict "service" "functions" "dbSecretRef" .Values.functions.dbSecretRef "user" "postgres" "Values" .Values) }}
+                  key: password
+            - name: DB_PASSWORD_ENC
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "supabase-ha.dbSecretRef" (dict "service" "functions" "dbSecretRef" .Values.functions.dbSecretRef "user" "postgres" "Values" .Values) }}
+                  key: password
+            - name: DB_DATABASE
+              value: {{ .Values.functions.dbName | default "postgres" | quote }}
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  {{- if .Values.secret.jwt.secretRef }}
+                  name: {{ .Values.secret.jwt.secretRef }}
+                  key: {{ .Values.secret.jwt.secretRefKey.secret | default "secret" }}
+                  {{- else }}
+                  name: {{ include "supabase-ha.secret.jwt" . }}
+                  key: secret
+                  {{- end }}
+            - name: SUPABASE_ANON_KEY
+              valueFrom:
+                secretKeyRef:
+                  {{- if .Values.secret.jwt.secretRef }}
+                  name: {{ .Values.secret.jwt.secretRef }}
+                  key: {{ .Values.secret.jwt.secretRefKey.anonKey | default "anonKey" }}
+                  {{- else }}
+                  name: {{ include "supabase-ha.secret.jwt" . }}
+                  key: anonKey
+                  {{- end }}
+            - name: SUPABASE_SERVICE_ROLE_KEY
+              valueFrom:
+                secretKeyRef:
+                  {{- if .Values.secret.jwt.secretRef }}
+                  name: {{ .Values.secret.jwt.secretRef }}
+                  key: {{ .Values.secret.jwt.secretRefKey.serviceKey | default "serviceKey" }}
+                  {{- else }}
+                  name: {{ include "supabase-ha.secret.jwt" . }}
+                  key: serviceKey
+                  {{- end }}
+            - name: POSTGRES_BACKEND_URL
+              value: $(DB_DRIVER)://$(DB_USERNAME):$(DB_PASSWORD_ENC)@$(DB_HOSTNAME):$(DB_PORT)/$(DB_DATABASE)?search_path=auth&sslmode=$(DB_SSL)
+          {{- with .Values.functions.livenessProbe }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.functions.readinessProbe }}
+          readinessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            {{- with .Values.functions.volumeMounts }}
+              {{- toYaml . | nindent 12 }}
+            {{- end }}
+            - mountPath: /home/deno/functions/main/index.ts
+              name: functions-main
+              subPath: index.ts
+            - mountPath: /var/tmp
+              name: tmp-cache
+          {{- with .Values.functions.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      volumes:
+        {{- with .Values.functions.volumes }}
+          {{- toYaml . | nindent 8 }}
+        {{- end }}
+        - name: functions-main
+          configMap:
+            name: {{ include "supabase-ha.functions.fullname" . }}-main
+            defaultMode: 0644
+        - name: tmp-cache
+          emptyDir: {}
+      {{- with .Values.functions.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.functions.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.functions.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

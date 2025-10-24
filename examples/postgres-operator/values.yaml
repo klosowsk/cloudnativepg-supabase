@@ -1,0 +1,80 @@
+# Zalando Postgres Operator Configuration
+# Install with:
+#   helm repo add postgres-operator-charts https://opensource.zalando.com/postgres-operator/charts/postgres-operator
+#   helm install postgres-operator postgres-operator-charts/postgres-operator \
+#     --namespace postgres-operator \
+#     --create-namespace \
+#     --values values.yaml
+
+# Operator image
+image:
+  registry: ghcr.io
+  repository: zalando/postgres-operator
+  tag: v1.14.0
+  pullPolicy: IfNotPresent
+
+# General configuration
+configGeneral:
+  # Enable CRD registration
+  enable_crd_registration: true
+
+  # Default Spilo image (will be overridden in supabase-ha chart)
+  docker_image: ghcr.io/zalando/spilo-17:4.0-p3
+
+  # Number of worker threads
+  workers: 2
+
+  # Resync period
+  resync_period: 30m
+
+# Kubernetes configuration
+configKubernetes:
+  # Watch all namespaces
+  watched_namespace: "*"
+
+  # Enable finalizers for proper cleanup
+  enable_finalizers: true
+
+  # Enable PVC deletion on cluster deletion
+  enable_persistent_volume_claim_deletion: true
+
+  # Enable pod disruption budget
+  enable_pod_disruption_budget: true
+
+  # Storage resize strategy
+  storage_resize_mode: pvc
+
+# Pod resource defaults
+configPostgresPodResources:
+  default_cpu_request: 100m
+  default_cpu_limit: "1"
+  default_memory_request: 100Mi
+  default_memory_limit: 500Mi
+  min_cpu_limit: 250m
+  min_memory_limit: 250Mi
+
+# Debug configuration
+configDebug:
+  debug_logging: true
+  enable_database_access: true
+
+# Operator pod resources
+resources:
+  requests:
+    cpu: 100m
+    memory: 250Mi
+  limits:
+    cpu: 500m
+    memory: 500Mi
+
+# RBAC
+rbac:
+  create: true
+
+# Service Account
+serviceAccount:
+  create: true
+
+# Pod Service Account (for PostgreSQL pods)
+podServiceAccount:
+  name: "postgres-pod"

@@ -1,0 +1,17 @@
+{{- if .Values.functions.enabled -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "supabase-ha.functions.fullname" . }}
+  labels:
+    {{- include "supabase-ha.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.functions.service.type }}
+  ports:
+    - port: {{ .Values.functions.service.port }}
+      targetPort: 9000
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "supabase-ha.functions.selectorLabels" . | nindent 4 }}
+{{- end }}

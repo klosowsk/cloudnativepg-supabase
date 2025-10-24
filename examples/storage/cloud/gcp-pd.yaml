@@ -1,0 +1,116 @@
+# GCP Persistent Disk StorageClass for Supabase PostgreSQL
+#
+# Google Cloud Persistent Disks provide durable storage for GKE clusters.
+# pd-ssd (SSD) is recommended for production PostgreSQL workloads.
+#
+# Prerequisites:
+# - GCP Compute Persistent Disk CSI Driver (pre-installed in GKE 1.18+)
+# - See: https://cloud.google.com/kubernetes-engine/docs/how-to/persistent-volumes/gce-pd-csi-driver
+#
+# Disk Types:
+# - pd-ssd: SSD, best performance (RECOMMENDED for PostgreSQL)
+# - pd-balanced: Balanced SSD, good performance at lower cost
+# - pd-standard: HDD, lowest cost (NOT recommended for databases)
+# - pd-extreme: Ultra-high performance SSD with custom IOPS
+#
+# Usage:
+# 1. Verify CSI driver: kubectl get pods -n kube-system | grep csi-gce-pd
+# 2. Apply this StorageClass: kubectl apply -f gcp-pd.yaml
+# 3. Deploy Supabase with: postgresql.volume.storageClass=gcp-pd-ssd
+
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: gcp-pd-ssd
+  labels:
+    app: supabase
+    component: storage
+provisioner: pd.csi.storage.gke.io
+allowVolumeExpansion: true  # Allow volume resizing
+reclaimPolicy: Retain       # Keep disk when PVC deleted
+volumeBindingMode: WaitForFirstConsumer  # Create disk in same zone as pod
+parameters:
+  type: pd-ssd              # SSD persistent disk
+  fstype: ext4
+  replication-type: none    # Single-zone replication (standard)
+
+---
+# Alternative: Balanced SSD for cost-effective performance
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: gcp-pd-balanced
+  labels:
+    app: supabase
+    component: storage
+provisioner: pd.csi.storage.gke.io
+allowVolumeExpansion: true
+reclaimPolicy: Retain
+volumeBindingMode: WaitForFirstConsumer
+parameters:
+  type: pd-balanced  # Balanced SSD (newer, better price/performance than pd-ssd)
+  fstype: ext4
+  replication-type: none
+
+---
+# Alternative: Regional persistent disk for HA (replicated across 2 zones)
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: gcp-pd-ssd-regional
+  labels:
+    app: supabase
+    component: storage
+provisioner: pd.csi.storage.gke.io
+allowVolumeExpansion: true
+reclaimPolicy: Retain
+volumeBindingMode: WaitForFirstConsumer
+parameters:
+  type: pd-ssd
+  fstype: ext4
+  replication-type: regional-pd  # Synchronously replicated across 2 zones in same region
+  # Note: Requires zones parameter or topology constraints
+
+---
+# Alternative: Extreme performance for mission-critical workloads
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: gcp-pd-extreme
+  labels:
+    app: supabase
+    component: storage
+provisioner: pd.csi.storage.gke.io
+allowVolumeExpansion: true
+reclaimPolicy: Retain
+volumeBindingMode: WaitForFirstConsumer
+parameters:
+  type: pd-extreme
+  fstype: ext4
+  provisioned-iops-on-create: "100000"  # Provision specific IOPS (up to 100000)
+  # Note: pd-extreme requires specific machine types and minimum disk size (64 GiB)
+
+---
+# Performance Comparison (GCP Persistent Disks)
+#
+# pd-standard (HDD):
+#   - IOPS: 0.75-7.5 per GB (max 7500 read, 15000 write)
+#   - Throughput: 0.12-1.2 MB/s per GB (max 1200 read, 400 write)
+#   - Use case: Archival, backups (NOT for databases)
+#
+# pd-balanced (SSD):
+#   - IOPS: 6 per GB (max 80000 read, 30000 write)
+#   - Throughput: 0.28 MB/s per GB (max 1200 read/write)
+#   - Use case: Balanced performance/cost for most workloads
+#
+# pd-ssd (SSD):
+#   - IOPS: 30 per GB (max 100000 read, 30000 write)
+#   - Throughput: 0.48 MB/s per GB (max 1200 read/write)
+#   - Use case: High-performance databases
+#
+# pd-extreme (Ultra SSD):
+#   - IOPS: Customizable up to 100000 per volume
+#   - Throughput: Up to 2400 MB/s read/write
+#   - Use case: Mission-critical, low-latency workloads
+#
+# See full specs: https://cloud.google.com/compute/docs/disks

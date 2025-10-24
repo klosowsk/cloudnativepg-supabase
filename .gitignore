@@ -28,12 +28,6 @@ supabase/
 .tmp/
 
 # Legacy documentation files
-ARCHITECTURE.md/
-BUILD.md
-MIGRATION-CONTEXT.md
-README-OLD.md
-
-# Internal reference documentation (gitignored)
-docs/
-
 references/
+notes/
+my-example/

@@ -1,0 +1,44 @@
+apiVersion: v2
+name: supabase-ha
+version: 0.2.0
+description: |
+  Supabase with High Availability PostgreSQL using Zalando Postgres Operator.
+
+  This chart deploys both:
+  - A highly available PostgreSQL cluster (via Zalando operator)
+  - All Supabase stateless services (Auth, REST, Realtime, Storage, etc.)
+
+type: application
+keywords:
+  - supabase
+  - postgres
+  - postgresql
+  - high-availability
+  - zalando
+  - spilo
+  - firebase-alternative
+  - backend-as-a-service
+home: https://github.com/supabase/supabase
+icon: https://avatars.githubusercontent.com/u/54469796?s=280&v=4
+sources:
+  - https://github.com/supabase/supabase
+  - https://github.com/zalando/postgres-operator
+  - https://github.com/zalando/spilo
+maintainers:
+  - name: Rodrigo Klosowski
+    email: klosowsk@gmail.com
+
+# PREREQUISITE: Zalando Postgres Operator must be installed first
+# Install with:
+#   helm repo add postgres-operator-charts https://opensource.zalando.com/postgres-operator/charts/postgres-operator
+#   helm install postgres-operator postgres-operator-charts/postgres-operator --namespace postgres-operator --create-namespace
+#
+# This chart does NOT include the operator as a dependency to allow:
+# - One operator to serve multiple Supabase instances
+# - Independent operator lifecycle management
+# - Cluster-scoped vs namespace-scoped separation
+dependencies: []
+
+annotations:
+  category: Database
+  licenses: Apache-2.0

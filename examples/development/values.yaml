@@ -1,0 +1,409 @@
+# Development Environment - Ephemeral (No Persistence)
+# Minimal resources, single instance, in-memory storage for testing
+
+global:
+  clusterName: "dev-supabase-db"
+  autoDiscoverSecrets: true
+
+# PostgreSQL Configuration - Ephemeral/In-Memory
+postgresql:
+  enabled: true
+  teamId: "supabase-dev"
+  version: "15"
+  numberOfInstances: 1  # Single instance for dev
+
+  # Use the newly built image (with registry for remote clusters)
+  dockerImage: klosowsk/spilo-supabase:15.8.1.085-3.2-p1-86ed380
+
+  # Minimal resources
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 2Gi
+
+  # Development storage using K3s local-path (default StorageClass)
+  # Data is stored on node's local disk, will be lost if node/pod is deleted
+  # For true ephemeral, Zalando operator requires a StorageClass (doesn't support emptyDir)
+  volume:
+    size: 2Gi
+    storageClass: local-path  # K3s default - local storage on node
+
+  # Run as postgres user
+  spiloRunAsUser: 101
+  spiloRunAsGroup: 103
+  spiloFSGroup: 103
+
+  # Supabase users with appropriate privileges
+  users:
+    supabase_admin:
+      - superuser
+      - createdb
+      - createrole
+      - replication
+      - bypassrls
+    service_role:
+      - bypassrls
+    authenticator: []
+    supabase_auth_admin:
+      - createrole
+    supabase_storage_admin:
+      - createrole
+    supabase_functions_admin:
+      - createrole
+    supabase_replication_admin:
+      - replication
+    supabase_etl_admin:
+      - replication
+    supabase_read_only_user:
+      - bypassrls
+    anon: []
+    authenticated: []
+    dashboard_user:
+      - createdb
+      - createrole
+
+  databases:
+    postgres: supabase_admin
+
+  # PostgreSQL configuration optimized for dev (2GB RAM, ephemeral)
+  parameters:
+    # Required extensions (preload at server start)
+    shared_preload_libraries: "pgsodium,timescaledb,pg_cron,pg_net,pg_stat_statements,auto_explain,pg_wait_sampling,pg_tle,plan_filter"
+    pgsodium.getkey_script: "/usr/share/postgresql/15/extension/pgsodium_getkey"
+    cron.database_name: "postgres"
+
+    # Connection settings - reduced for dev
+    max_connections: "100"
+
+    # Memory settings - tuned for 2GB limit
+    shared_buffers: "512MB"
+    effective_cache_size: "1536MB"
+    maintenance_work_mem: "128MB"
+    work_mem: "5MB"
+
+    # WAL settings for replication
+    wal_level: "logical"
+    max_wal_senders: "5"
+    max_replication_slots: "5"
+    max_logical_replication_workers: "4"
+
+    # Checkpoint settings
+    checkpoint_timeout: "10min"
+    checkpoint_completion_target: "0.9"
+
+    # WAL archiving
+    archive_mode: "on"
+    archive_timeout: "300s"
+
+    # Logging - minimal for dev
+    log_statement: "ddl"
+    log_duration: "off"
+    log_min_duration_statement: "2000"
+    log_checkpoints: "on"
+    log_connections: "off"
+    log_disconnections: "off"
+
+    # Performance monitoring
+    track_activities: "on"
+    track_counts: "on"
+    track_io_timing: "on"
+
+    # Autovacuum
+    autovacuum: "on"
+    autovacuum_max_workers: "2"
+    autovacuum_naptime: "60s"
+
+  # Patroni configuration
+  patroni:
+    initdb:
+      encoding: "UTF8"
+      locale: "en_US.UTF-8"
+      data-checksums: "true"
+
+    # Async replication for dev (less strict)
+    synchronous_mode: false
+
+    ttl: 30
+    loop_wait: 10
+    retry_timeout: 10
+    maximum_lag_on_failover: 33554432  # 32MB
+
+    # Allow non-SSL connections (dev only - not for production!)
+    pg_hba:
+      - local all all trust
+      - local replication standby trust
+      - hostssl all all all md5
+      - hostnossl all all all md5
+      - hostnossl replication standby all md5
+
+  # Environment variables for PostgreSQL pods (from secrets)
+  # Note: The chart will automatically inject JWT env vars from the jwt secret
+  # This section is handled by the postgresql.yaml template
+  env: []
+
+  # Connection pooler (PGBouncer) - lightweight for dev
+  connectionPooler:
+    enabled: true
+    numberOfInstances: 1
+    mode: "transaction"
+    schema: "pooler"
+    user: "pooler"
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi
+
+# Supabase Secrets - Development defaults
+secret:
+  jwt:
+    # Dev JWT tokens from Supabase demo - DO NOT USE IN PRODUCTION
+    # These are signed with the secret below (super-secret-jwt-token...)
+    anonKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0"
+    serviceKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU"
+    secret: "super-secret-jwt-token-with-at-least-32-characters-long"
+
+  dashboard:
+    username: "supabase"
+    password: "supabase"
+
+  analytics:
+    apiKey: "dev-analytics-api-key-12345"
+    publicApiKey: "dev-public-analytics-key-54321"
+    privateApiKey: "dev-private-analytics-key-67890"
+
+# Service Configuration - Minimal for dev
+studio:
+  enabled: true
+  replicaCount: 1
+
+  # POSTGRES_PASSWORD will be auto-discovered from Zalando secret (postgres user)
+
+  environment:
+    # Binds nestjs listener to both IPv4 and IPv6 network interfaces
+    HOSTNAME: "::"
+
+    # Self-hosted Postgres connection (required for Studio 2025.10.09+)
+    POSTGRES_HOST: dev-supabase-db
+    POSTGRES_PORT: "5432"
+    POSTGRES_DB: postgres
+
+    # Public URL (must match how users access Studio)
+    SUPABASE_PUBLIC_URL: http://10.20.0.35:8000
+
+    # Studio organization and project
+    STUDIO_DEFAULT_ORGANIZATION: "Development"
+    STUDIO_DEFAULT_PROJECT: "dev-supabase"
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+auth:
+  enabled: true
+  replicaCount: 1
+  environment:
+    # DB connection (DB_HOST and DB_PASSWORD auto-injected by template)
+    GOTRUE_DB_DRIVER: postgres
+    DB_USER: supabase_auth_admin
+    DB_PORT: "5432"
+    DB_SSL: disable
+
+    # External URLs
+    API_EXTERNAL_URL: http://localhost:8000
+    GOTRUE_SITE_URL: http://localhost:8000
+    GOTRUE_MAILER_AUTOCONFIRM: "true"
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+rest:
+  enabled: true
+  replicaCount: 1
+  environment:
+    # DB connection (DB_HOST and DB_PASSWORD auto-injected by template)
+    DB_DRIVER: postgres
+    DB_USER: authenticator
+    DB_PORT: "5432"
+    DB_SSL: disable
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+realtime:
+  enabled: true
+  replicaCount: 1
+  environment:
+    # DB connection (DB_HOST and DB_PASSWORD auto-injected by template)
+    DB_USER: supabase_admin
+    DB_PORT: "5432"
+    DB_SSL: "false"  # Realtime requires boolean string, not "disable"
+    DB_AFTER_CONNECT_QUERY: "SET search_path TO _realtime"
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+meta:
+  enabled: true
+  replicaCount: 1
+  environment:
+    # DB connection (DB_HOST and DB_PASSWORD auto-injected by template)
+    DB_USER: supabase_admin
+    DB_PORT: "5432"
+    DB_SSL: disable
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+storage:
+  enabled: true
+  replicaCount: 1
+  persistence:
+    enabled: false  # Ephemeral - no persistence
+  environment:
+    # DB connection (DB_HOST and DB_PASSWORD auto-injected by template)
+    DB_DRIVER: postgres
+    DB_USER: supabase_storage_admin
+    DB_PORT: "5432"
+    DB_SSL: disable
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+imgproxy:
+  enabled: true
+  replicaCount: 1
+  persistence:
+    enabled: false
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+kong:
+  enabled: true
+  replicaCount: 1
+  service:
+    type: LoadBalancer  # Or NodePort for local access
+  environment:
+    KONG_NGINX_WORKER_PROCESSES: "2"  # Reduce workers for dev (default is auto = CPU cores)
+  resources:
+    requests:
+      cpu: 100m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+
+analytics:
+  enabled: true
+  replicaCount: 1
+  environment:
+    # DB connection (DB_HOST and DB_PASSWORD auto-injected by template)
+    DB_DRIVER: postgres
+    DB_USERNAME: postgres
+    DB_SCHEMA: _analytics
+    DB_PORT: "5432"
+  resources:
+    requests:
+      cpu: 100m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+
+vector:
+  enabled: true
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 25m
+      memory: 64Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
+
+functions:
+  enabled: true
+  replicaCount: 1
+  environment:
+    # DB connection (DB_HOST and DB_PASSWORD auto-injected by template)
+    DB_DRIVER: postgres
+    DB_USERNAME: postgres
+    DB_PORT: "5432"
+    DB_SSL: disable
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+# Disable optional services
+minio:
+  enabled: false
+
+# Supavisor - Connection pooler (enabled for testing)
+supavisor:
+  enabled: true
+  replicaCount: 1
+  environment:
+    # DB connection (DB_HOST and DB_PASSWORD auto-injected by template)
+    DB_PORT: "5432"
+    POSTGRES_PORT: "5432"
+    CLUSTER_POSTGRES: "true"
+
+    # Pooler configuration
+    PORT: "4000"
+    REGION: local
+    POOLER_TENANT_ID: "stub"
+    POOLER_DEFAULT_POOL_SIZE: "15"
+    POOLER_MAX_CLIENT_CONN: "200"
+    POOLER_POOL_MODE: transaction
+
+    # Erlang settings
+    ERL_AFLAGS: -proto_dist inet_tcp
+
+    # Secret keys (dev values - change for production)
+    SECRET_KEY_BASE: "dev-secret-key-base-UpNVntn3cDxHJpq99YMc1T1AQgQpc8kfYTuRgBi"
+    VAULT_ENC_KEY: "abcdefghijklmnopqrstuvwxyzABCDEF"
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi

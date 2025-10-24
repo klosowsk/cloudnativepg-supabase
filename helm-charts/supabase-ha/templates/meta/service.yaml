@@ -1,0 +1,17 @@
+{{- if .Values.meta.enabled -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "supabase-ha.meta.fullname" . }}
+  labels:
+    {{- include "supabase-ha.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.meta.service.type }}
+  ports:
+    - port: {{ .Values.meta.service.port }}
+      targetPort: 8080
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "supabase-ha.meta.selectorLabels" . | nindent 4 }}
+{{- end }}

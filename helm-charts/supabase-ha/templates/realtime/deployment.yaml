@@ -1,0 +1,137 @@
+{{- if .Values.realtime.enabled -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "supabase-ha.realtime.fullname" . }}
+  labels:
+    {{- include "supabase-ha.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.realtime.autoscaling.enabled }}
+  replicas: {{ .Values.realtime.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "supabase-ha.realtime.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.realtime.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "supabase-ha.realtime.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.realtime.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "supabase-ha.realtime.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.realtime.podSecurityContext | nindent 8 }}
+      initContainers:
+        - name: init-db
+          image: postgres:15-alpine
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: DB_HOST
+              {{- if .Values.postgresql.enabled }}
+              value: {{ include "supabase-ha.db.fullname" . | quote }}
+              {{- else }}
+              value: {{ .Values.auth.environment.DB_HOST | quote }}
+              {{- end }}
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "supabase-ha.dbSecretRef" (dict "service" "realtime" "dbSecretRef" .Values.realtime.dbSecretRef "user" "supabase_admin" "Values" .Values) }}
+                  key: username
+            - name: DB_PORT
+              value: {{ .Values.analytics.environment.DB_PORT | quote }}
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              until pg_isready -h $(DB_HOST) -p $(DB_PORT) -U $(DB_USER); do
+              echo "Waiting for database to start..."
+              sleep 2
+              done
+            - echo "Database is ready"
+      containers:
+        - name: {{ include "supabase-ha.realtime.name" $ }}
+          securityContext:
+            {{- toYaml .Values.realtime.securityContext | nindent 12 }}
+          image: "{{ .Values.realtime.image.repository }}:{{ .Values.realtime.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.realtime.image.pullPolicy }}
+          command: ["/bin/sh"]
+          args: ["-c", "/app/bin/migrate && /app/bin/realtime eval 'Realtime.Release.seeds(Realtime.Repo)' && /app/bin/server"]
+          env:
+            {{- range $key, $value := .Values.realtime.environment }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+            {{- if .Values.postgresql.enabled }}
+            - name: DB_HOST
+              value: {{ include "supabase-ha.db.fullname" . }}
+            {{- end }}
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "supabase-ha.dbSecretRef" (dict "service" "realtime" "dbSecretRef" .Values.realtime.dbSecretRef "user" "supabase_admin" "Values" .Values) }}
+                  key: password
+            - name: DB_NAME
+              value: {{ .Values.realtime.dbName | default "postgres" | quote }}
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  {{- if .Values.secret.jwt.secretRef }}
+                  name: {{ .Values.secret.jwt.secretRef }}
+                  key: {{ .Values.secret.jwt.secretRefKey.secret | default "secret" }}
+                  {{- else }}
+                  name: {{ include "supabase-ha.secret.jwt" . }}
+                  key: secret
+                  {{- end }}
+            - name: API_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  {{- if .Values.secret.jwt.secretRef }}
+                  name: {{ .Values.secret.jwt.secretRef }}
+                  key: {{ .Values.secret.jwt.secretRefKey.secret | default "secret" }}
+                  {{- else }}
+                  name: {{ include "supabase-ha.secret.jwt" . }}
+                  key: secret
+                  {{- end }}
+          {{- with .Values.realtime.livenessProbe }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.realtime.readinessProbe }}
+          readinessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          ports:
+            - name: http
+              containerPort: 4000
+              protocol: TCP
+          {{- with .Values.realtime.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.realtime.volumeMounts }}
+          volumeMounts:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      {{- with .Values.realtime.volumes }}
+      volumes:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.realtime.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.realtime.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.realtime.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

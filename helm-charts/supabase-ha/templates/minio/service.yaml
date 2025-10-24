@@ -1,0 +1,17 @@
+{{- if .Values.minio.enabled -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "supabase-ha.minio.fullname" . }}
+  labels:
+    {{- include "supabase-ha.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.minio.service.type }}
+  ports:
+    - port: {{ .Values.minio.service.port }}
+      targetPort: 9000
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "supabase-ha.minio.selectorLabels" . | nindent 4 }}
+{{- end }}

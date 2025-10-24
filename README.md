@@ -1,134 +1,388 @@
-# Spilo Supabase
+# Supabase HA Kubernetes
 
-**Supabase-ready PostgreSQL for Kubernetes with high availability.**
+**Deploy Supabase with High Availability PostgreSQL on Kubernetes**
 
-A custom [Spilo](https://github.com/zalando/spilo) image with all Supabase extensions and migrations pre-installed. Deploy with [Zalando Postgres Operator](https://github.com/zalando/postgres-operator) for production-ready HA PostgreSQL clusters.
+Production-ready Supabase deployment using Zalando Postgres Operator for true high availability, automatic failover, and enterprise-grade PostgreSQL management.
 
-> Based on **PostgreSQL 15.8** with **Supabase 1.085** compatibility. Schemas, extensions, and migrations are sourced from the [official Supabase postgres repository](https://github.com/supabase/postgres) tag `15.8.1.085`.
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15.8-blue.svg)](https://www.postgresql.org/)
+[![Supabase](https://img.shields.io/badge/Supabase-1.085-green.svg)](https://supabase.com/)
 
-## What You Get
+## ✨ Features
 
-### Supabase Schemas
-- `auth` - User authentication
-- `storage` - File storage
-- `realtime` - WebSocket subscriptions
-- `extensions` - PostgreSQL extensions
-- `supabase_functions` - Edge Functions
-- `graphql_public` - GraphQL API
-- All internal Supabase schemas
+- **High Availability PostgreSQL** - Automatic failover with Patroni (3-node clusters)
+- **All-in-One Deployment** - Database and Supabase services in the same namespace
+- **Auto-Secret Discovery** - Automatically configures Zalando-generated database credentials
+- **Multi-Environment Ready** - Single Helm chart for dev, staging, and production
+- **Production Grade** - Built on battle-tested Zalando Postgres Operator and Spilo
+- **Complete Supabase Stack** - All official services: Auth, Storage, Realtime, Functions, etc.
+- **GitOps Ready** - Works seamlessly with ArgoCD, Flux, or direct Helm
+- **Custom Extensions** - Pre-loaded with all Supabase extensions + pgvector, PostGIS, TimescaleDB
 
-### Supabase Extensions
-- `pg_net` - Async HTTP (Edge Functions)
-- `pgsodium` - Encryption
-- `supabase_vault` - Secrets management
-- `pg_graphql` - GraphQL API
-- `supautils` - Supabase utilities
-- `pgvector` - Vector similarity (AI/embeddings)
-- `pg_tle` - Trusted Language Extensions
-- `pg_cron` - Job scheduling
-- `wal2json` - Realtime replication
-- `postgis` - Geospatial data
-- And more...
+## 🚀 Quick Start
 
-### Supabase Roles
-All standard Supabase roles are created automatically (from official Supabase repos):
-- `supabase_admin`, `authenticator`, `service_role`, `anon`, `authenticated`
-- Service-specific admin roles for auth, storage, and functions
-- Replication and read-only users
+### Prerequisites
 
-## Quick Start
+- Kubernetes 1.21+
+- Helm 3.8+
+- kubectl configured
 
-### 1. Install Zalando Postgres Operator
+### Installation
 
 ```bash
+# 1. Install Zalando Postgres Operator (once per cluster)
 helm repo add postgres-operator-charts https://opensource.zalando.com/postgres-operator/charts/postgres-operator
 helm install postgres-operator postgres-operator-charts/postgres-operator \
-  --namespace postgres-operator --create-namespace
+  --namespace postgres-operator \
+  --create-namespace
+
+# 2. Verify operator is running
+kubectl get pods -n postgres-operator
+
+# 3. Install Supabase Production Instance
+helm install supabase-prod ./helm-charts/supabase-ha \
+  --namespace prod-supabase \
+  --create-namespace \
+  --values examples/high-availability/values.yaml
+
+# 4. Wait for PostgreSQL cluster to be ready
+kubectl wait --for=condition=ready pod -l cluster-name=prod-supabase-db \
+  -n prod-supabase --timeout=300s
+
+# 5. Get auto-generated database password
+kubectl get secret supabase-admin.prod-supabase-db.credentials.postgresql.acid.zalan.do \
+  -n prod-supabase -o jsonpath='{.data.password}' | base64 -d && echo
 ```
 
-### 2. Use Pre-Built Image
+### Access Supabase
 
 ```bash
-docker pull klosowsk/spilo-supabase:15.8.1.085-3.2-p1
-# Or use the latest tag for PG15
-docker pull klosowsk/spilo-supabase:15-latest
+# Port-forward Kong API Gateway
+kubectl port-forward -n prod-supabase svc/kong 8000:8000
+
+# Port-forward Studio Dashboard
+kubectl port-forward -n prod-supabase svc/studio 3000:3000
+
+# Access:
+# - API: http://localhost:8000
+# - Studio: http://localhost:3000
 ```
 
-Or build your own:
+## 🏗️ Architecture
+
+### Two-Tier Design
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  Tier 1: Postgres Operator (Cluster-Scoped)             │
+│  Install once per cluster, manages all PostgreSQL CRDs  │
+└─────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────┐
+│  Tier 2: Supabase HA (Namespace-Scoped)                 │
+│  Install per environment (dev, staging, prod)           │
+│                                                         │
+│  • PostgreSQL Cluster (1-3 nodes with Patroni)          │
+│  • Supabase Services (Auth, REST, Storage, etc.)        │
+│  • Deployed together in same namespace                  │
+└─────────────────────────────────────────────────────────┘
+```
+
+### What Makes This Unique
+
+- **High Availability + Supabase Stack** - Production-grade PostgreSQL HA combined with complete Supabase ecosystem
+- **Accessible PostgreSQL** - Enterprise database reliability without operational complexity
+- **Data Safety First** - Battle-tested Zalando operator with automatic failover and backup capabilities
+- **Kubernetes-Native** - Seamless scaling, self-healing, and cloud-agnostic deployment
+- **Community-Driven** - Open source, self-hosted solution with full control over your data
+
+### Components
+
+| Component | Purpose | HA |
+|-----------|---------|-----|
+| **PostgreSQL Cluster** | Spilo + Patroni for automatic failover | ✅ 3 nodes |
+| **Connection Pooler** | PgBouncer or Supavisor (optional) | ✅ 2-3 instances |
+| **Auth (GoTrue)** | User authentication | ✅ Stateless |
+| **REST (PostgREST)** | Automatic REST API | ✅ Stateless |
+| **Realtime** | WebSocket subscriptions | ✅ Stateless |
+| **Storage** | File storage (external object storage) | ✅ Stateless |
+| **Studio** | Admin dashboard | ✅ Stateless |
+| **Kong** | API Gateway | ✅ Stateless |
+| **Functions** | Edge Functions runtime | ✅ Stateless |
+| **Analytics** | Logflare analytics | ✅ Stateless |
+
+## 📦 What's Included
+
+### Custom Spilo PostgreSQL Image
+
+Pre-loaded with all Supabase extensions:
+
+- **Supabase Core**: pgsodium, pg_net, supabase_vault, pg_graphql
+- **AI/ML**: pgvector (vector similarity search)
+- **Geospatial**: PostGIS
+- **Time-Series**: TimescaleDB
+- **Job Scheduling**: pg_cron
+- **And 40+ more extensions**
+
+See [docker/spilo-supabase/](docker/spilo-supabase/) for image details.
+
+### Supabase Services
+
+All official Supabase services are included with production-ready defaults:
+
+- ✅ Studio Dashboard
+- ✅ Auth (GoTrue) with email/OAuth
+- ✅ REST API (PostgREST)
+- ✅ Realtime subscriptions
+- ✅ Storage API with image transforms
+- ✅ Edge Functions runtime
+- ✅ Analytics (Logflare)
+- ✅ Postgres Meta
+
+## 📚 Quick Links
+
+- **[Examples](examples/)** - Deployment configurations and storage setup
+- **[Spilo Supabase Image](docker/spilo-supabase/)** - Custom PostgreSQL image with Supabase extensions
+- **[Comprehensive Documentation](#-comprehensive-documentation)** - Complete guides below
+
+## 🎯 Deployment Examples
+
+**Note**: These examples are reference configurations. Customize to your specific needs.
+
+### Development
+
+Single PostgreSQL instance, minimal resources:
+
 ```bash
-./build.sh
+helm install supabase-dev ./helm-charts/supabase-ha \
+  --namespace dev-supabase \
+  --create-namespace \
+  --values examples/development/values.yaml
 ```
 
-See [documentation/build-guide.md](documentation/build-guide.md) for build details.
+- **PostgreSQL**: 1 instance (no HA)
+- **Resources**: 512Mi RAM, 0.25 CPU
+- **Storage**: 5Gi
+- **Example use case**: Local testing, development
 
-### 3. Deploy Database
+### High Availability
 
-Choose a deployment template and customize for your environment:
-
-| Template | Nodes | Use Case |
-|----------|-------|----------|
-| [single.yaml](manifests/supabase-postgres-zalando-single.yaml) | 1 | Development, Testing |
-| [duo.yaml](manifests/supabase-postgres-zalando-duo.yaml) | 2 | Staging |
-| [trio.yaml](manifests/supabase-postgres-zalando-trio.yaml) | 3 | Production |
+Three PostgreSQL instances with full HA:
 
 ```bash
-# Edit the manifest to customize for your environment
-# Then apply:
-kubectl apply -f manifests/supabase-postgres-zalando-trio.yaml
+helm install supabase-ha ./helm-charts/supabase-ha \
+  --namespace ha-supabase \
+  --create-namespace \
+  --values examples/high-availability/values.yaml
 ```
 
-### 4. Get Credentials
+- **PostgreSQL**: 3 instances (primary + 2 replicas)
+- **Resources**: 4Gi RAM, 2 CPU per instance
+- **Storage**: 100Gi with fast SSDs
+- **Monitoring**: Optional Prometheus exporters
+- **Backups**: Optional WAL archiving
+- **Example use case**: Production workloads
 
-```bash
-# Retrieve the authenticator password
-kubectl get secret authenticator.supabase-db.credentials.postgresql.acid.zalan.do \
-  -n supabase -o jsonpath='{.data.password}' | base64 -d
-```
+## 🔧 Configuration
 
-### 5. Connect Supabase Services
-
-Point your Supabase services to the connection pooler:
+### Minimal Configuration
 
 ```yaml
-POSTGRES_HOST: supabase-db-pooler.supabase.svc.cluster.local
-POSTGRES_PORT: 5432
-POSTGRES_DB: postgres
-POSTGRES_USER: authenticator
-POSTGRES_PASSWORD: <from-secret-above>
+# values.yaml
+global:
+  clusterName: "my-supabase-db"
+
+secret:
+  jwt:
+    anonKey: "your-anon-key"
+    serviceKey: "your-service-key"
+    secret: "your-jwt-secret"
+  dashboard:
+    password: "secure-password"
+
+postgresql:
+  dockerImage: klosowsk/spilo-supabase:15.8.1.085-3.2-p1
+  numberOfInstances: 3
+
+kong:
+  ingress:
+    enabled: true
+    hosts:
+      - host: api.yourdomain.com
 ```
 
-## Verification
+See [examples/](examples/) for complete configuration examples.
+
+## 🔐 Secret Management
+
+### Auto-Generated Secrets
+
+Zalando operator automatically creates secrets for all database users:
+
+```
+{username}.{cluster-name}.credentials.postgresql.acid.zalan.do
+```
+
+Example:
+```
+supabase-admin.prod-supabase-db.credentials.postgresql.acid.zalan.do
+authenticator.prod-supabase-db.credentials.postgresql.acid.zalan.do
+```
+
+### Retrieve Credentials
 
 ```bash
-# Check cluster status
-kubectl get postgresql -n supabase
+# Get postgres superuser password
+kubectl get secret postgres.prod-supabase-db.credentials.postgresql.acid.zalan.do \
+  -n prod-supabase -o jsonpath='{.data.password}' | base64 -d
 
-# View logs
-kubectl logs supabase-db-0 -n supabase | grep "Supabase"
-
-# Connect and verify
-kubectl exec -it supabase-db-0 -n supabase -- psql -U postgres
-\dn          -- List schemas
-\dx          -- List extensions
+# Get supabase_admin password
+kubectl get secret supabase-admin.prod-supabase-db.credentials.postgresql.acid.zalan.do \
+  -n prod-supabase -o jsonpath='{.data.password}' | base64 -d
 ```
 
-## Documentation
+### Auto-Discovery
 
-- [Migration Structure](documentation/migration-structure.md) - How Supabase initialization works
-- [Architecture Overview](documentation/architecture.md) - What's included
-- [Build Guide](documentation/build-guide.md) - How to build the image
-- [Deployment Guide](documentation/deployment-guide.md) - Deployment and operations
+Helm chart automatically discovers and configures these secrets for all Supabase services. No manual configuration required!
 
-For Zalando Postgres Operator details, see the [official documentation](https://postgres-operator.readthedocs.io/).
+## 🚢 GitOps Deployment
 
-## License
+### ArgoCD Example
 
-Apache License 2.0
+```yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: supabase-prod
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/your-org/supabase-ha-kubernetes
+    targetRevision: main
+    path: helm-charts/supabase-ha
+    helm:
+      valueFiles:
+        - ../../examples/production/values.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: prod-supabase
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+```
 
-## Acknowledgments
+## 🔄 Upgrading
 
-Built with:
-- [Zalando Postgres Operator](https://github.com/zalando/postgres-operator) - Kubernetes PostgreSQL operator
-- [Spilo](https://github.com/zalando/spilo) - PostgreSQL HA container image
-- [Supabase](https://github.com/supabase/postgres) - Open source Firebase alternative
-- [Pigsty](https://pigsty.io/) - PostgreSQL extension repository
+```bash
+# Upgrade Supabase services (safe, stateless)
+helm upgrade supabase-prod ./helm-charts/supabase-ha \
+  --namespace prod-supabase \
+  --values examples/high-availability/values.yaml
+
+# Upgrade PostgreSQL version (requires planning)
+# Consult Zalando Postgres Operator documentation for major version upgrades
+```
+
+## 📊 Monitoring
+
+### Prometheus Integration
+
+PostgreSQL metrics are exported automatically when sidecars are enabled:
+
+```yaml
+postgresql:
+  sidecars:
+    - name: postgres-exporter
+      image: quay.io/prometheuscommunity/postgres-exporter:latest
+      ports:
+        - name: metrics
+          containerPort: 9187
+```
+
+Access metrics:
+```bash
+kubectl port-forward -n prod-supabase pod/prod-supabase-db-0 9187:9187
+curl http://localhost:9187/metrics
+```
+
+## 🧪 Testing
+
+```bash
+# Install dev environment
+helm install supabase-test ./helm-charts/supabase-ha \
+  --namespace test-supabase \
+  --create-namespace \
+  --values examples/development/values.yaml
+
+# Wait for ready
+kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=supabase-ha \
+  -n test-supabase --timeout=300s
+
+# Run tests
+kubectl exec -n test-supabase supabase-test-db-0 -c postgres -- \
+  psql -U postgres -c "SELECT * FROM pg_available_extensions;"
+
+# Cleanup
+helm uninstall supabase-test -n test-supabase
+kubectl delete namespace test-supabase
+```
+
+## 🤝 Contributing
+
+Contributions are welcome! Please feel free to submit issues and pull requests.
+
+### Development Setup
+
+```bash
+# Clone repository
+git clone https://github.com/your-org/supabase-ha-kubernetes
+cd supabase-ha-kubernetes
+
+# Build custom Spilo image
+cd docker/spilo-supabase
+./build.sh
+
+# Test Helm chart
+helm lint ./helm-charts/supabase-ha
+helm template supabase ./helm-charts/supabase-ha \
+  --values examples/development/values.yaml > test-output.yaml
+```
+
+## 📖 Comprehensive Documentation
+
+For detailed guides and references:
+
+- **[Installation Guide](docs/installation.md)** - Complete setup instructions with prerequisites and post-installation steps
+- **[Configuration Reference](docs/configuration.md)** - All configuration options for PostgreSQL, services, and secrets
+- **[Architecture](docs/architecture.md)** - System design, components, HA setup, and data flow
+- **[Troubleshooting](docs/troubleshooting.md)** - Common issues and solutions for all components
+- **[Examples Guide](examples/README.md)** - Deployment scenarios and storage configuration
+
+## 📝 License
+
+Apache License 2.0 - see [LICENSE](LICENSE) file for details.
+
+## 🙏 Acknowledgments
+
+This project builds on excellent work from:
+
+- **[Zalando Postgres Operator](https://github.com/zalando/postgres-operator)** - Production-grade PostgreSQL on Kubernetes
+- **[Spilo](https://github.com/zalando/spilo)** - HA PostgreSQL with Patroni
+- **[Supabase](https://github.com/supabase)** - Open source Firebase alternative
+- **[Supabase Kubernetes Community](https://github.com/supabase-community/supabase-kubernetes)** - Original Kubernetes charts
+- **[Pigsty](https://pigsty.io/)** - PostgreSQL extension repository
+
+## 🔗 Links
+
+- [Supabase Documentation](https://supabase.com/docs)
+- [Zalando Postgres Operator Docs](https://postgres-operator.readthedocs.io/)
+- [Spilo Documentation](https://github.com/zalando/spilo)
+- [Patroni Documentation](https://patroni.readthedocs.io/)
+
+---
+
+**Built for the Supabase and Kubernetes communities**

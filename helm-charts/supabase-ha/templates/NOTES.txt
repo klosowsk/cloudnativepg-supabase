@@ -1,0 +1,166 @@
+---
+🎉 Thank you for installing {{ .Chart.Name }}!
+
+Your Supabase installation with High Availability PostgreSQL is being deployed.
+
+{{- if .Values.postgresql.enabled }}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📊 PostgreSQL Cluster Information
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Cluster Name: {{ .Values.global.clusterName }}
+Namespace: {{ .Release.Namespace }}
+Instances: {{ .Values.postgresql.numberOfInstances }} (1 primary + {{ sub (.Values.postgresql.numberOfInstances | int) 1 }} replica{{if gt (.Values.postgresql.numberOfInstances | int) 2}}s{{end}})
+{{- if .Values.postgresql.connectionPooler.enabled }}
+Connection Pooler: Enabled (PgBouncer)
+{{- end }}
+
+⏳ Wait for PostgreSQL cluster to be ready:
+
+  kubectl wait --for=condition=ready pod \
+    -l cluster-name={{ .Values.global.clusterName }} \
+    -n {{ .Release.Namespace }} \
+    --timeout=300s
+
+🔍 Check cluster status:
+
+  kubectl get postgresql {{ .Values.global.clusterName }} -n {{ .Release.Namespace }}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🔐 Database Credentials
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Zalando operator auto-generates passwords for all database users.
+Secrets follow the pattern: {username}.{{ .Values.global.clusterName }}.credentials.postgresql.acid.zalan.do
+
+📝 Get superuser (postgres) password:
+
+  kubectl get secret postgres.{{ .Values.global.clusterName }}.credentials.postgresql.acid.zalan.do \
+    -n {{ .Release.Namespace }} \
+    -o jsonpath='{.data.password}' | base64 -d && echo
+
+📝 Get supabase_admin password:
+
+  kubectl get secret supabase-admin.{{ .Values.global.clusterName }}.credentials.postgresql.acid.zalan.do \
+    -n {{ .Release.Namespace }} \
+    -o jsonpath='{.data.password}' | base64 -d && echo
+
+📝 List all database secrets:
+
+  kubectl get secrets -n {{ .Release.Namespace }} | grep postgresql.acid.zalan.do
+
+{{- end }}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🚀 Accessing Supabase
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+{{ if .Values.kong.ingress.enabled -}}
+{{- $host := (index .Values.kong.ingress.hosts 0).host -}}
+API Gateway: https://{{ $host }}
+Studio Dashboard: https://{{ $host }}/project/default
+
+{{- if .Values.studio.ingress.enabled }}
+{{- $studioHost := (index .Values.studio.ingress.hosts 0).host }}
+Studio (Direct): https://{{ $studioHost }}
+{{- end }}
+
+{{- else }}
+
+Port-forward to access services locally:
+
+🌐 Kong API Gateway:
+  kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "supabase-ha.fullname" . }}-kong 8000:8000
+
+  Then access:
+  - API: http://localhost:8000
+  - Studio: http://localhost:8000/project/default
+
+{{- if .Values.studio.enabled }}
+📊 Studio Dashboard (Direct):
+  kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "supabase-ha.fullname" . }}-studio 3000:3000
+  Then access: http://localhost:3000
+{{- end }}
+
+{{- if .Values.postgresql.enabled }}
+🗄️  PostgreSQL Database:
+  kubectl port-forward -n {{ .Release.Namespace }} svc/{{ .Values.global.clusterName }}-rw 5432:5432
+  Then connect: psql -h localhost -U postgres -d postgres
+{{- end }}
+
+{{- end }}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🔗 API Endpoints
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+{{- $baseUrl := "" }}
+{{- if .Values.kong.ingress.enabled }}
+  {{- $host := (index .Values.kong.ingress.hosts 0).host }}
+  {{- $baseUrl = printf "https://%s" $host }}
+{{- else }}
+  {{- $baseUrl = "http://localhost:8000" }}
+{{- end }}
+
+REST API:     {{ $baseUrl }}/rest/v1/
+Auth:         {{ $baseUrl }}/auth/v1/
+Realtime:     {{ $baseUrl }}/realtime/v1/
+Storage:      {{ $baseUrl }}/storage/v1/
+Functions:    {{ $baseUrl }}/functions/v1/
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📋 Verification
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Check all pods are running:
+
+  kubectl get pods -n {{ .Release.Namespace }}
+
+{{- if .Values.postgresql.enabled }}
+
+Connect to PostgreSQL and verify extensions:
+
+  kubectl exec -it {{ .Values.global.clusterName }}-0 \
+    -n {{ .Release.Namespace }} -c postgres -- \
+    psql -U postgres -c "\dx"
+
+Check Patroni cluster status:
+
+  kubectl exec -it {{ .Values.global.clusterName }}-0 \
+    -n {{ .Release.Namespace }} -c postgres -- \
+    patronictl list
+
+{{- end }}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📚 Next Steps
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. Wait for all pods to be Running
+2. Retrieve database passwords (see commands above)
+3. Access Studio dashboard to configure your project
+4. Create your first table using Studio or SQL
+5. Test the REST API endpoints
+
+For documentation, visit:
+https://supabase.com/docs
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🆘 Troubleshooting
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+{{- if .Values.postgresql.enabled }}
+PostgreSQL not starting:
+  kubectl describe postgresql {{ .Values.global.clusterName }} -n {{ .Release.Namespace }}
+  kubectl logs {{ .Values.global.clusterName }}-0 -n {{ .Release.Namespace }}
+{{- end }}
+
+Service can't connect to database:
+  kubectl logs -n {{ .Release.Namespace }} deployment/{{ include "supabase-ha.fullname" . }}-auth
+
+For more help:
+- GitHub Issues: https://github.com/your-repo/supabase-ha-kubernetes
+- Supabase Discord: https://discord.supabase.com
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

@@ -1,0 +1,157 @@
+{{- if .Values.supavisor.enabled -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "supabase-ha.supavisor.fullname" . }}
+  labels:
+    {{- include "supabase-ha.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.supavisor.autoscaling.enabled }}
+  replicas: {{ .Values.supavisor.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "supabase-ha.supavisor.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.supavisor.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "supabase-ha.supavisor.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.supavisor.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "supabase-ha.supavisor.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.supavisor.podSecurityContext | nindent 8 }}
+      initContainers:
+        - name: init-db
+          image: postgres:15-alpine
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: DB_HOST
+              {{- if .Values.postgresql.enabled }}
+              value: {{ include "supabase-ha.db.fullname" . | quote }}
+              {{- else }}
+              value: {{ .Values.supavisor.environment.DB_HOST | quote }}
+              {{- end }}
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "supabase-ha.dbSecretRef" (dict "service" "supavisor" "dbSecretRef" .Values.supavisor.dbSecretRef "user" "supabase_admin" "Values" .Values) }}
+                  key: username
+            - name: DB_PORT
+              value: {{ .Values.supavisor.environment.DB_PORT | default "5432" | quote }}
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              until pg_isready -h $(DB_HOST) -p $(DB_PORT) -U $(DB_USER); do
+              echo "Waiting for database to start..."
+              sleep 2
+              done
+              echo "Database is ready"
+      containers:
+        - name: {{ include "supabase-ha.supavisor.name" $ }}
+          securityContext:
+            {{- toYaml .Values.supavisor.securityContext | nindent 12 }}
+          image: "{{ .Values.supavisor.image.repository }}:{{ .Values.supavisor.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.supavisor.image.pullPolicy }}
+          command: ["/bin/sh"]
+          args: ["-c", "/app/bin/migrate && /app/bin/supavisor eval \"$$(cat /etc/pooler/pooler.exs)\" && /app/bin/server"]
+          env:
+            {{- range $key, $value := .Values.supavisor.environment }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+            {{- if .Values.postgresql.enabled }}
+            - name: DB_HOST
+              value: {{ include "supabase-ha.db.fullname" . }}
+            {{- end }}
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "supabase-ha.dbSecretRef" (dict "service" "supavisor" "dbSecretRef" .Values.supavisor.dbSecretRef "user" "supabase_admin" "Values" .Values) }}
+                  key: password
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "supabase-ha.dbSecretRef" (dict "service" "supavisor" "dbSecretRef" .Values.supavisor.dbSecretRef "user" "supabase_admin" "Values" .Values) }}
+                  key: password
+            - name: POSTGRES_DB
+              value: {{ .Values.supavisor.dbName | default "_supabase" | quote }}
+            - name: API_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  {{- if .Values.secret.jwt.secretRef }}
+                  name: {{ .Values.secret.jwt.secretRef }}
+                  key: {{ .Values.secret.jwt.secretRefKey.secret | default "secret" }}
+                  {{- else }}
+                  name: {{ include "supabase-ha.secret.jwt" . }}
+                  key: secret
+                  {{- end }}
+            - name: METRICS_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  {{- if .Values.secret.jwt.secretRef }}
+                  name: {{ .Values.secret.jwt.secretRef }}
+                  key: {{ .Values.secret.jwt.secretRefKey.secret | default "secret" }}
+                  {{- else }}
+                  name: {{ include "supabase-ha.secret.jwt" . }}
+                  key: secret
+                  {{- end }}
+            - name: DATABASE_URL
+              value: "ecto://supabase_admin:$(POSTGRES_PASSWORD)@$(DB_HOST):$(DB_PORT)/_supabase"
+          {{- with .Values.supavisor.livenessProbe }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.supavisor.readinessProbe }}
+          readinessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          ports:
+            - name: http
+              containerPort: 4000
+              protocol: TCP
+            - name: pooler
+              containerPort: 5432
+              protocol: TCP
+            - name: pooler-proxy
+              containerPort: 6543
+              protocol: TCP
+          {{- with .Values.supavisor.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: pooler-config
+              mountPath: /etc/pooler
+              readOnly: true
+          {{- with .Values.supavisor.volumeMounts }}
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      volumes:
+        - name: pooler-config
+          configMap:
+            name: {{ include "supabase-ha.supavisor.fullname" . }}-config
+            defaultMode: 0444
+      {{- with .Values.supavisor.volumes }}
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.supavisor.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.supavisor.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.supavisor.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

@@ -1,0 +1,739 @@
+# Supabase HA Helm Chart Values
+# This chart deploys both PostgreSQL cluster and Supabase services in the same namespace
+
+# ============================================================
+# Global Configuration
+# ============================================================
+global:
+  # Cluster name - used as prefix for resources
+  clusterName: "supabase-db"
+
+  # Auto-discovery of Zalando-generated secrets
+  # When enabled, the chart will automatically configure dbSecretRef for all services
+  autoDiscoverSecrets: true
+
+# ============================================================
+# PostgreSQL Cluster Configuration (Zalando Operator)
+# ============================================================
+postgresql:
+  # Enable PostgreSQL cluster deployment
+  # Set to false if using external database
+  enabled: true
+
+  # Cluster metadata
+  teamId: "supabase"
+  version: "15"
+
+  # High availability configuration
+  numberOfInstances: 3  # 1 primary + 2 replicas
+
+  # Custom Spilo image with Supabase extensions
+  # Replace with your own registry if needed
+  dockerImage: klosowsk/spilo-supabase:15.8.1.085-3.2-p1
+
+  # Pod resources (adjust based on workload)
+  resources:
+    requests:
+      cpu: 1000m
+      memory: 2Gi
+    limits:
+      cpu: 2000m
+      memory: 4Gi
+
+  # Storage configuration
+  # IMPORTANT: You must deploy StorageClass separately (chart does NOT create it)
+  # See: examples/storage/README.md for setup instructions
+  volume:
+    size: 50Gi
+    # StorageClass options:
+    #   "" (empty)          = Ephemeral storage (dev only, data lost on restart)
+    #   "standard"          = Use cluster's default StorageClass
+    #   "longhorn"          = Longhorn dynamic provisioning (on-prem HA)
+    #   "aws-gp3"           = AWS EBS gp3 (cloud)
+    #   "azure-disk"        = Azure Managed Disk (cloud)
+    #   "gcp-pd-ssd"        = GCP Persistent Disk (cloud)
+    #   "supabase-local"    = Local static PVs (K3s/homelab)
+    # You must create the StorageClass + PVs (if static) before deploying
+    storageClass: standard
+
+  # Security context - Run as non-root postgres user
+  spiloRunAsUser: 101    # postgres user UID
+  spiloRunAsGroup: 103   # postgres group GID
+  spiloFSGroup: 103      # Volume group ownership
+
+  # Supabase database users (auto-created by operator)
+  # Passwords are auto-generated and stored in secrets
+  users:
+    supabase_admin:
+      - superuser
+      - createdb
+      - createrole
+      - replication
+      - bypassrls
+    service_role:
+      - bypassrls
+    authenticator: []
+    supabase_auth_admin:
+      - createrole
+    supabase_storage_admin:
+      - createrole
+    supabase_functions_admin:
+      - createrole
+    supabase_replication_admin:
+      - replication
+    supabase_read_only_user:
+      - bypassrls
+    anon: []
+    authenticated: []
+
+  databases:
+    postgres: supabase_admin
+
+  # PostgreSQL parameters
+  parameters:
+    # Required: Supabase extensions
+    shared_preload_libraries: "timescaledb,pgsodium,pg_cron,pg_net,pg_stat_statements,auto_explain,pg_wait_sampling,pg_tle,plan_filter"
+    cron.database_name: "postgres"
+
+    # Required: Realtime/replication
+    wal_level: "logical"
+    max_wal_senders: "10"
+    max_replication_slots: "10"
+
+    # Performance tuning (adjust based on workload)
+    max_connections: "200"
+    shared_buffers: "512MB"
+    effective_cache_size: "1536MB"
+    work_mem: "5MB"
+    maintenance_work_mem: "128MB"
+
+    # Logging
+    log_min_duration_statement: "1000"
+    log_statement: "ddl"
+
+  # Patroni HA configuration
+  patroni:
+    initdb:
+      encoding: "UTF8"
+      locale: "en_US.UTF-8"
+      data-checksums: "true"
+    synchronous_mode: true
+    synchronous_mode_strict: false
+
+  # Connection pooler (PgBouncer)
+  connectionPooler:
+    enabled: true
+    numberOfInstances: 2
+    mode: "transaction"
+    resources:
+      requests:
+        cpu: 100m
+        memory: 100Mi
+      limits:
+        cpu: 500m
+        memory: 500Mi
+
+  # Environment variables for PostgreSQL pods
+  # JWT config is injected from secrets (created by this chart)
+  env: []
+
+# ============================================================
+# Supabase Secrets Configuration
+# ============================================================
+secret:
+  # JWT tokens for Supabase API
+  jwt:
+    # Generate these using: https://supabase.com/docs/guides/self-hosting#api-keys
+    anonKey: ""           # REQUIRED: Public anonymous key
+    serviceKey: ""        # REQUIRED: Service role key (admin access)
+    secret: ""            # REQUIRED: JWT secret (used to sign tokens)
+
+    # OR use existing secret
+    secretRef: ""
+    secretRefKey:
+      anonKey: anonKey
+      serviceKey: serviceKey
+      secret: secret
+
+  # Dashboard credentials (for Kong/Studio access)
+  dashboard:
+    username: "supabase"
+    password: ""  # REQUIRED: Set a secure password
+
+    # OR use existing secret
+    secretRef: ""
+    secretRefKey:
+      username: username
+      password: password
+
+  # Analytics API keys (REQUIRED - must be different from each other)
+  analytics:
+    apiKey: "dev-analytics-key"            # REQUIRED: Generate random base64 string
+    publicApiKey: "dev-public-analytics-key"  # REQUIRED: Generate random base64 string (must be different from apiKey)
+    privateApiKey: "dev-private-analytics-key"     # REQUIRED: Generate random base64 string (must be different from apiKey)
+
+  # SMTP credentials (optional)
+  smtp:
+    username: ""
+    password: ""
+
+  # S3 credentials (optional, for storage)
+  s3:
+    keyId: ""
+    accessKey: ""
+
+# ============================================================
+# Supabase Services Configuration
+# ============================================================
+
+# Studio - Admin dashboard
+studio:
+  enabled: true
+  image:
+    repository: supabase/studio
+    tag: "2025.10.20-sha-5005fc6"
+    pullPolicy: IfNotPresent
+
+  replicaCount: 1
+
+  serviceAccount:
+    create: true
+    annotations: {}
+    name: ""
+
+  service:
+    type: ClusterIP
+    port: 3000
+
+  # Auto-configured if postgresql.enabled=true and autoDiscoverSecrets=true
+  dbSecretRef: ""
+
+  environment:
+    HOSTNAME: "::"
+    STUDIO_DEFAULT_ORGANIZATION: "Default Organization"
+    STUDIO_DEFAULT_PROJECT: "Default Project"
+    SUPABASE_PUBLIC_URL: http://example.com  # CHANGE THIS
+    NEXT_PUBLIC_ENABLE_LOGS: "true"
+    NEXT_ANALYTICS_BACKEND_PROVIDER: postgres
+
+  ingress:
+    enabled: false
+
+  resources: {}
+
+  autoscaling:
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 80
+
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# Auth - GoTrue authentication service
+auth:
+  enabled: true
+  image:
+    repository: supabase/gotrue
+    tag: "v2.180.0"
+    pullPolicy: IfNotPresent
+
+  replicaCount: 1
+
+  serviceAccount:
+    create: true
+    annotations: {}
+    name: ""
+
+  service:
+    type: ClusterIP
+    port: 9999
+
+  # Auto-configured if postgresql.enabled=true and autoDiscoverSecrets=true
+  dbSecretRef: ""
+  dbName: postgres
+
+  environment:
+    GOTRUE_API_HOST: 0.0.0.0
+    GOTRUE_API_PORT: "9999"
+    API_EXTERNAL_URL: http://example.com  # CHANGE THIS
+    GOTRUE_SITE_URL: http://example.com   # CHANGE THIS
+    GOTRUE_DISABLE_SIGNUP: "false"
+    GOTRUE_JWT_ADMIN_ROLES: service_role
+    GOTRUE_JWT_AUD: authenticated
+    GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
+    GOTRUE_JWT_EXP: "3600"
+    GOTRUE_EXTERNAL_EMAIL_ENABLED: "true"
+    GOTRUE_MAILER_AUTOCONFIRM: "true"
+
+  resources: {}
+
+  autoscaling:
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 80
+
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# REST - PostgREST API service
+rest:
+  enabled: true
+  image:
+    repository: postgrest/postgrest
+    tag: "v13.0.7"
+    pullPolicy: IfNotPresent
+
+  replicaCount: 1
+
+  serviceAccount:
+    create: true
+    annotations: {}
+    name: ""
+
+  service:
+    type: ClusterIP
+    port: 3000
+
+  # Auto-configured if postgresql.enabled=true and autoDiscoverSecrets=true
+  dbSecretRef: ""
+  dbName: postgres
+
+  environment:
+    PGRST_DB_SCHEMAS: public,storage,graphql_public
+    PGRST_DB_ANON_ROLE: anon
+    PGRST_DB_USE_LEGACY_GUCS: "false"
+    PGRST_APP_SETTINGS_JWT_EXP: "3600"
+
+  resources: {}
+
+  autoscaling:
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 80
+
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# Realtime - WebSocket subscriptions
+realtime:
+  enabled: true
+  image:
+    repository: supabase/realtime
+    tag: "v2.51.11"
+    pullPolicy: IfNotPresent
+
+  replicaCount: 1
+
+  serviceAccount:
+    create: true
+    annotations: {}
+    name: ""
+
+  service:
+    type: ClusterIP
+    port: 4000
+
+  # Auto-configured if postgresql.enabled=true and autoDiscoverSecrets=true
+  dbSecretRef: ""
+  dbName: postgres
+
+  environment:
+    DB_AFTER_CONNECT_QUERY: "SET search_path TO _realtime"
+    DB_ENC_KEY: supabaserealtime
+    PORT: "4000"
+    SECRET_KEY_BASE: UpNVntn3cDxHJpq99YMc1T1AQgQpc8kfYTuRgBiYa15BLrx8etQoXz3gZv1/u2oq
+    ERL_AFLAGS: -proto_dist inet_tcp
+    DNS_NODES: "''"
+    APP_NAME: realtime
+    SEED_SELF_HOST: "true"
+
+  resources: {}
+
+  autoscaling:
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 80
+
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# Meta - postgres-meta service
+meta:
+  enabled: true
+  image:
+    repository: supabase/postgres-meta
+    tag: "v0.91.6"
+    pullPolicy: IfNotPresent
+
+  replicaCount: 1
+
+  serviceAccount:
+    create: true
+    annotations: {}
+    name: ""
+
+  service:
+    type: ClusterIP
+    port: 8080
+
+  # Auto-configured if postgresql.enabled=true and autoDiscoverSecrets=true
+  dbSecretRef: ""
+  dbName: postgres
+
+  environment:
+    PG_META_PORT: "8080"
+
+  resources: {}
+
+  autoscaling:
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 80
+
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# Storage - Storage API
+storage:
+  enabled: true
+  image:
+    repository: supabase/storage-api
+    tag: "v1.28.1"
+    pullPolicy: IfNotPresent
+
+  replicaCount: 1
+
+  serviceAccount:
+    create: true
+    annotations: {}
+    name: ""
+
+  service:
+    type: ClusterIP
+    port: 5000
+
+  # Auto-configured if postgresql.enabled=true and autoDiscoverSecrets=true
+  dbSecretRef: ""
+  dbName: postgres
+
+  environment:
+    FILE_SIZE_LIMIT: "52428800"
+    STORAGE_BACKEND: file
+    FILE_STORAGE_BACKEND_PATH: /var/lib/storage
+    TENANT_ID: stub
+    REGION: stub
+    GLOBAL_S3_BUCKET: stub
+
+  persistence:
+    enabled: true
+    storageClass: ""
+    size: 10Gi
+
+  resources: {}
+
+  autoscaling:
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 80
+
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# Image Proxy
+imgproxy:
+  enabled: true
+  image:
+    repository: darthsim/imgproxy
+    tag: "v3.8.0"
+    pullPolicy: IfNotPresent
+
+  replicaCount: 1
+
+  serviceAccount:
+    create: true
+    annotations: {}
+    name: ""
+
+  service:
+    type: ClusterIP
+    port: 5001
+
+  environment:
+    IMGPROXY_BIND: ":5001"
+    IMGPROXY_LOCAL_FILESYSTEM_ROOT: /
+    IMGPROXY_USE_ETAG: "true"
+    IMGPROXY_ENABLE_WEBP_DETECTION: "true"
+
+  persistence:
+    enabled: false
+
+  resources: {}
+
+  autoscaling:
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 80
+
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# Kong - API Gateway
+kong:
+  enabled: true
+  image:
+    repository: kong
+    tag: "2.8.1"
+    pullPolicy: IfNotPresent
+
+  replicaCount: 1
+
+  serviceAccount:
+    create: true
+    annotations: {}
+    name: ""
+
+  service:
+    type: ClusterIP
+    port: 8000
+
+  environment:
+    KONG_DATABASE: "off"
+    KONG_DECLARATIVE_CONFIG: /usr/local/kong/kong.yml
+    KONG_DNS_ORDER: LAST,A,CNAME
+    KONG_PLUGINS: request-transformer,cors,key-auth,acl,basic-auth
+    KONG_NGINX_PROXY_PROXY_BUFFER_SIZE: 160k
+    KONG_NGINX_PROXY_PROXY_BUFFERS: 64 160k
+    KONG_LOG_LEVEL: info
+
+  ingress:
+    enabled: false
+    className: nginx
+    hosts:
+      - host: example.com
+        paths:
+          - path: /
+            pathType: Prefix
+    tls: []
+
+  resources: {}
+
+  autoscaling:
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 80
+
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# Analytics - Logflare
+analytics:
+  enabled: true
+  image:
+    repository: supabase/logflare
+    tag: "1.23.2"
+    pullPolicy: IfNotPresent
+
+  replicaCount: 1
+
+  serviceAccount:
+    create: true
+    annotations: {}
+    name: ""
+
+  service:
+    type: ClusterIP
+    port: 4000
+
+  # Auto-configured if postgresql.enabled=true and autoDiscoverSecrets=true
+  dbSecretRef: ""
+  dbName: _supabase
+
+  environment:
+    LOGFLARE_NODE_HOST: 127.0.0.1
+    LOGFLARE_SINGLE_TENANT: "true"
+    LOGFLARE_SUPABASE_MODE: "true"
+    LOGFLARE_MIN_CLUSTER_SIZE: "1"
+    POSTGRES_BACKEND_SCHEMA: _analytics
+    FEATURE_FLAG_OVERRIDE: multibackend=true
+
+  # BigQuery integration (optional)
+  bigQuery:
+    enabled: false
+    gcloudJson: ""  # Base64-encoded service account JSON
+
+  resources: {}
+
+  autoscaling:
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 80
+
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# Vector - Log collector
+vector:
+  enabled: true
+  image:
+    repository: timberio/vector
+    tag: "0.28.1-alpine"
+    pullPolicy: IfNotPresent
+
+  replicaCount: 1
+
+  serviceAccount:
+    create: true
+    annotations: {}
+    name: ""
+
+  service:
+    type: ClusterIP
+    port: 9001
+
+  resources: {}
+
+  autoscaling:
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 80
+
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# Functions - Edge functions runtime
+functions:
+  enabled: true
+  image:
+    repository: supabase/edge-runtime
+    tag: "v1.69.6"
+    pullPolicy: IfNotPresent
+
+  replicaCount: 1
+
+  serviceAccount:
+    create: true
+    annotations: {}
+    name: ""
+
+  service:
+    type: ClusterIP
+    port: 9000
+
+  # Auto-configured if postgresql.enabled=true and autoDiscoverSecrets=true
+  dbSecretRef: ""
+  dbName: postgres
+
+  environment:
+    SUPABASE_URL: http://kong:8000
+    VERIFY_JWT: "false"
+
+  resources: {}
+
+  autoscaling:
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 80
+
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# MinIO - S3-compatible storage (optional, test/development only)
+minio:
+  enabled: false
+  image:
+    repository: minio/minio
+    tag: latest
+    pullPolicy: IfNotPresent
+  serviceAccount:
+    create: true
+    annotations: {}
+    name: ""
+  service:
+    type: ClusterIP
+    port: 9000
+  persistence:
+    enabled: false
+    size: 10Gi
+  resources: {}
+
+  autoscaling:
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 80
+
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# Supavisor - Connection pooler (optional, alternative to PgBouncer)
+supavisor:
+  enabled: false
+  image:
+    repository: supabase/supavisor
+    tag: "2.7.0"
+    pullPolicy: IfNotPresent
+
+  replicaCount: 1
+
+  serviceAccount:
+    create: true
+    annotations: {}
+    name: ""
+
+  service:
+    type: ClusterIP
+    port: 4000
+    poolerPort: 6543
+
+  # Auto-configured if postgresql.enabled=true and autoDiscoverSecrets=true
+  dbSecretRef: ""
+  dbName: _supabase
+
+  environment:
+    PORT: "4000"
+    REGION: local
+    POOLER_TENANT_ID: "stub"
+    POOLER_DEFAULT_POOL_SIZE: "15"
+    POOLER_MAX_CLIENT_CONN: "200"
+    POOLER_POOL_MODE: transaction
+
+    # Secret key base (64+ chars) - CHANGE IN PRODUCTION
+    SECRET_KEY_BASE: "your-super-secret-key-base-must-be-at-least-64-characters-long-change-this"
+
+    # Vault encryption key (exactly 32 chars) - CHANGE IN PRODUCTION
+    VAULT_ENC_KEY: "abcdefghijklmnopqrstuvwxyzABCDEF"
+
+  resources: {}
+
+  autoscaling:
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 80
+
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}

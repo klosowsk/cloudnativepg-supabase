@@ -1,0 +1,17 @@
+{{- if .Values.storage.enabled -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "supabase-ha.storage.fullname" . }}
+  labels:
+    {{- include "supabase-ha.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.storage.service.type }}
+  ports:
+    - port: {{ .Values.storage.service.port }}
+      targetPort: 5000
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "supabase-ha.storage.selectorLabels" . | nindent 4 }}
+{{- end }}

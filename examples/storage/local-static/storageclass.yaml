@@ -1,0 +1,10 @@
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: supabase-local
+  labels:
+    app: supabase
+    component: storage
+provisioner: kubernetes.io/no-provisioner  # Manual provisioning - you create PVs
+volumeBindingMode: WaitForFirstConsumer    # Bind PV only when pod is scheduled (ensures correct node)
+reclaimPolicy: Retain                      # Keep PV and data when PVC is deleted
