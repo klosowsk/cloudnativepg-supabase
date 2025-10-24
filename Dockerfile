@@ -24,6 +24,7 @@ RUN apt-get update && apt-get install -y \
     wget \
     gnupg \
     lsb-release \
+    patch \
     && rm -rf /var/lib/apt/lists/*
 
 # Add Pigsty APT repository for Supabase extensions
@@ -63,6 +64,16 @@ RUN mkdir -p /etc/apt/keyrings && \
         postgresql-${PGVERSION}-pg-plan-filter \
         postgresql-${PGVERSION}-pg-wait-sampling \
         && echo "✓ Installed Supabase extensions from Pigsty"
+
+# Apply Spilo patches for Supabase security compliance
+COPY patches/*.patch /tmp/patches/
+RUN cd /scripts && \
+    patch -p1 < /tmp/patches/01-spilo-extensions-schema.patch && \
+    patch -p1 < /tmp/patches/02-spilo-metric-helpers.patch && \
+    patch -p1 < /tmp/patches/03-spilo-search-path-user-functions.patch && \
+    patch -p1 < /tmp/patches/04-spilo-search-path-zmon.patch && \
+    rm -rf /tmp/patches && \
+    echo "✓ Applied Spilo security fixes"
 
 # Create pgsodium getkey script
 # This script is required by pgsodium when loaded via shared_preload_libraries

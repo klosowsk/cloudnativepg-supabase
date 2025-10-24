@@ -1,0 +1,40 @@
+--- a/post_init.sh	2025-10-23 20:33:25
++++ b/post_init.sh	2025-10-23 20:39:41
+@@ -47,9 +47,9 @@
+     END IF;
+ END;\$\$;
+ 
+-CREATE EXTENSION IF NOT EXISTS pg_auth_mon SCHEMA public;
++CREATE EXTENSION IF NOT EXISTS pg_auth_mon SCHEMA extensions;
+ ALTER EXTENSION pg_auth_mon UPDATE;
+-GRANT SELECT ON TABLE public.pg_auth_mon TO robot_zmon;
++GRANT SELECT ON TABLE extensions.pg_auth_mon TO robot_zmon;
+ 
+ CREATE EXTENSION IF NOT EXISTS pg_cron SCHEMA pg_catalog;
+ DO \$\$
+@@ -102,7 +102,7 @@
+ REVOKE USAGE ON SCHEMA cron FROM admin;
+ GRANT USAGE ON SCHEMA cron TO cron_admin;
+ 
+-CREATE EXTENSION IF NOT EXISTS file_fdw SCHEMA public;
++CREATE EXTENSION IF NOT EXISTS file_fdw SCHEMA extensions;
+ DO \$\$
+ BEGIN
+     PERFORM * FROM pg_catalog.pg_foreign_server WHERE srvname = 'pglog';
+@@ -186,12 +186,12 @@
+         fi
+     fi
+     sed "s/:HUMAN_ROLE/$1/" create_user_functions.sql
+-    echo "CREATE EXTENSION IF NOT EXISTS pg_stat_statements SCHEMA public;
+-CREATE EXTENSION IF NOT EXISTS pg_stat_kcache SCHEMA public;
+-CREATE EXTENSION IF NOT EXISTS set_user SCHEMA public;
++    echo "CREATE EXTENSION IF NOT EXISTS pg_stat_statements SCHEMA extensions;
++CREATE EXTENSION IF NOT EXISTS pg_stat_kcache SCHEMA extensions;
++CREATE EXTENSION IF NOT EXISTS set_user SCHEMA extensions;
+ ALTER EXTENSION set_user UPDATE;
+ GRANT EXECUTE ON FUNCTION public.set_user(text) TO admin;
+-GRANT EXECUTE ON FUNCTION public.pg_stat_statements_reset($RESET_ARGS) TO admin;"
++GRANT EXECUTE ON FUNCTION extensions.pg_stat_statements_reset($RESET_ARGS) TO admin;"
+     if [ "$PGVER" -lt 10 ]; then
+         echo "GRANT EXECUTE ON FUNCTION pg_catalog.pg_switch_xlog() TO admin;"
+     else

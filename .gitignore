@@ -28,7 +28,7 @@ supabase/
 .tmp/
 
 # Legacy documentation files
-ARCHITECTURE.md
+ARCHITECTURE.md/
 BUILD.md
 MIGRATION-CONTEXT.md
 README-OLD.md

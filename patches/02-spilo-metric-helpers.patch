@@ -1,0 +1,14 @@
+--- a/metric_helpers.sql	2025-10-23 20:33:31
++++ b/metric_helpers.sql	2025-10-23 20:33:43
+@@ -186,9 +186,9 @@
+ 
+ CREATE OR REPLACE VIEW index_bloat AS SELECT * FROM get_btree_bloat_approx();
+ 
+-CREATE OR REPLACE FUNCTION pg_stat_statements(showtext boolean) RETURNS SETOF public.pg_stat_statements AS
++CREATE OR REPLACE FUNCTION pg_stat_statements(showtext boolean) RETURNS SETOF extensions.pg_stat_statements AS
+ $$
+-  SELECT * FROM public.pg_stat_statements(showtext);
++  SELECT * FROM extensions.pg_stat_statements(showtext);
+ $$ LANGUAGE sql IMMUTABLE SECURITY DEFINER STRICT;
+ 
+ CREATE OR REPLACE VIEW pg_stat_statements AS SELECT * FROM pg_stat_statements(true);

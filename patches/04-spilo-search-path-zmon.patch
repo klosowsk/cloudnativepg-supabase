@@ -1,0 +1,38 @@
+--- a/_zmon_schema.dump	2025-10-23 20:35:49
++++ b/_zmon_schema.dump	2025-10-23 20:36:02
+@@ -163,7 +163,7 @@
+ $BODY$
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+-SET search_path to 'pg_catalog';
++SET search_path = 'pg_catalog';
+ 
+ CREATE OR REPLACE FUNCTION zmon_utils.get_database_cluster_system_information()
+ RETURNS SETOF zmon_utils.system_information
+@@ -443,7 +443,7 @@
+ $BODY$
+ LANGUAGE plpython3u
+ SECURITY DEFINER
+-SET search_path to 'pg_catalog';
++SET search_path = 'pg_catalog';
+ 
+ CREATE OR REPLACE FUNCTION zmon_utils.get_last_status_active_cronjobs(
+   OUT jobid bigint,
+@@ -468,7 +468,7 @@
+  WHERE job.active
+  ORDER BY job_run_details.jobid, job_run_details.start_time DESC NULLS LAST;
+ $BODY$
+-LANGUAGE sql SECURITY DEFINER STRICT SET search_path to 'cron';
++LANGUAGE sql SECURITY DEFINER STRICT SET search_path = 'cron', 'pg_catalog';
+ 
+ REVOKE EXECUTE ON FUNCTION zmon_utils.get_last_status_active_cronjobs() FROM public;
+ 
+@@ -493,7 +493,7 @@
+  FROM pg_stat_replication
+  ORDER BY replay_lag DESC NULLS LAST;
+ $BODY$
+-LANGUAGE sql SECURITY DEFINER STRICT SET search_path to 'pg_catalog';
++LANGUAGE sql SECURITY DEFINER STRICT SET search_path = 'pg_catalog';
+ 
+ CREATE OR REPLACE VIEW zmon_utils.replay_lag AS SELECT * FROM zmon_utils.get_replay_lag();
+ 
